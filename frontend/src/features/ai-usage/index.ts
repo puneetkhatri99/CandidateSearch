@@ -1,0 +1,1 @@
+export { AiSpendPage } from './components/AiSpendPage'
