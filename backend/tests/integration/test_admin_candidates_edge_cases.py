@@ -237,10 +237,23 @@ async def test_put_rejects_unknown_and_consent_fields(admin_client: AsyncClient)
         k: detail[k]
         for k in detail
         if k
-        not in {"id", "source", "created_at", "updated_at", "consent_given_at", "consent_version"}
+        not in {
+            "id",
+            "source",
+            "created_at",
+            "updated_at",
+            "consent_given_at",
+            "consent_version",
+            "has_resume",
+        }
     }
     assert (await admin_client.put(f"{URL}/{cid}", json=body)).status_code == 200
-    for extra in ({"source": "admin"}, {"consent_version": "hax"}, {"id": str(uuid.uuid4())}):
+    for extra in (
+        {"source": "admin"},
+        {"consent_version": "hax"},
+        {"id": str(uuid.uuid4())},
+        {"has_resume": True},
+    ):
         r = await admin_client.put(f"{URL}/{cid}", json={**body, **extra})
         assert r.status_code == 422, (extra, r.text)
 
@@ -258,7 +271,15 @@ async def test_audit_log_holds_no_personal_values(
         k: detail[k]
         for k in detail
         if k
-        not in {"id", "source", "created_at", "updated_at", "consent_given_at", "consent_version"}
+        not in {
+            "id",
+            "source",
+            "created_at",
+            "updated_at",
+            "consent_given_at",
+            "consent_version",
+            "has_resume",
+        }
     }
     body.update(full_name="Zed Renamed", email="zed.renamed@example.com", city="Springfield")
     assert (await admin_client.put(f"{URL}/{cid}", json=body)).status_code == 200

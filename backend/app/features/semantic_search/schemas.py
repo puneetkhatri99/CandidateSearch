@@ -1,15 +1,31 @@
+import uuid
+from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    ValidationInfo,
+    field_validator,
+)
 
 from app.features.candidates import CandidateSummary
-from app.shared.validation import normalize_country
+from app.shared.validation import (
+    MAX_SALARY,
+    BlankToNone,
+    Currency,
+    normalize_country,
+    salary_needs_currency,
+)
 
 MAX_QUERY_LENGTH = 500
 MAX_RESULTS = 25  # the best of the larger shortlist the LLM ranks (service.POOL_SIZE)
 
-FilterName = Literal["min_years", "skill", "city", "country", "source"]
+FilterName = Literal["min_years", "skill", "city", "country", "source", "max_salary"]
 
 
 def _clean(value: object) -> object:
@@ -31,11 +47,24 @@ class HardFilters(BaseModel):
     city: str | None = Field(default=None, max_length=100)
     country: Annotated[str, AfterValidator(normalize_country)] | None = None
     source: str | None = Field(default=None, max_length=30)
+    # The budget: a yearly amount in whole units of salary_currency (user decision 2026-11-02:
+    # over budget goes to "Filtered out"). Not strict, since query strings arrive as text.
+    max_salary: int | None = Field(default=None, ge=1, le=MAX_SALARY)
+    salary_currency: Annotated[Currency | None, BlankToNone] = Field(
+        default=None, validate_default=True
+    )
 
     @field_validator("skill", "city", "source", mode="before")
     @classmethod
     def _clean_text(cls, value: object) -> object:
         return _clean(value)
+
+    @field_validator("salary_currency")
+    @classmethod
+    def _currency_with_budget(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if "max_salary" not in info.data:
+            return value  # the amount itself failed; one error for one mistake
+        return salary_needs_currency(info.data["max_salary"] is not None, value)
 
 
 class SemanticSearchParams(HardFilters):
@@ -98,3 +127,36 @@ class SemanticSearchResult(BaseModel):
     embedding_model: str
     ranking_model: str | None
     prompt_version: str | None
+    # Set for a search by meaning: the saved copy the page reopens for free. None for job matches.
+    saved_search_id: uuid.UUID | None = None
+
+
+class SavedSearchSummary(BaseModel):
+    id: uuid.UUID
+    query: str
+    filters: dict[str, Any]  # Any: the filter values as sent (strings, numbers)
+    result_count: int
+    filtered_out_count: int
+    starred: bool
+    created_at: datetime
+
+
+class SavedSearchPage(BaseModel):
+    items: list[SavedSearchSummary]
+    next_cursor: str | None
+
+
+class SavedSearchDetail(BaseModel):
+    """A saved search reopened: its query and filters, and the result as it was shown."""
+
+    query: str
+    filters: dict[str, Any]  # Any: as in SavedSearchSummary
+    starred: bool
+    created_at: datetime
+    result: SemanticSearchResult
+
+
+class StarRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    starred: StrictBool

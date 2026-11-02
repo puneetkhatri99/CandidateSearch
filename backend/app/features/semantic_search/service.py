@@ -25,7 +25,7 @@ from app.core.llm import LLMError, get_llm_client
 from app.features import ai_usage, candidates, embeddings, jobs
 from app.features.audit import record_event
 from app.features.auth import AuthContext
-from app.features.semantic_search import ranking, understanding
+from app.features.semantic_search import history, ranking, understanding
 from app.features.semantic_search.exceptions import (
     JobNotReadyForMatchingError,
     QueryLooksPersonalError,
@@ -82,23 +82,48 @@ def failed_filters(
         failed.append("country")
     if params.source and candidate.summary.source != params.source:
         failed.append("source")
+    if (
+        params.max_salary is not None
+        and candidate.expected_salary is not None
+        and candidate.salary_currency == params.salary_currency
+        and candidate.expected_salary > params.max_salary
+    ):
+        failed.append("max_salary")
     return failed
 
 
 def _active_filters(params: HardFilters) -> list[str]:
-    names = ("min_years", "skill", "city", "country", "source")
+    names = ("min_years", "skill", "city", "country", "source", "max_salary")
     return [name for name in names if getattr(params, name) not in (None, "")]
 
 
 def _with_understood(filters: HardFilters, understood: HardFilters) -> HardFilters:
     """The recruiter's filters, plus what the search text states where they set nothing."""
-    return HardFilters(
-        min_years=filters.min_years if filters.min_years is not None else understood.min_years,
-        skill=filters.skill,
-        city=filters.city or understood.city,
-        country=filters.country or understood.country,
-        source=filters.source,
+    return filters.model_copy(
+        update={
+            "min_years": filters.min_years
+            if filters.min_years is not None
+            else understood.min_years,
+            "city": filters.city or understood.city,
+            "country": filters.country or understood.country,
+        }
     )
+
+
+def _with_budget(filters: HardFilters, understood: HardFilters | None) -> HardFilters:
+    """The budget the search text states becomes a hard filter (user decision 2026-11-02),
+    unless the recruiter set one."""
+    if filters.max_salary is not None or understood is None or understood.max_salary is None:
+        return filters
+    return filters.model_copy(
+        update={"max_salary": understood.max_salary, "salary_currency": understood.salary_currency}
+    )
+
+
+def _budget(filters: HardFilters) -> ranking.Budget | None:
+    if filters.max_salary is None or filters.salary_currency is None:
+        return None
+    return ranking.Budget(filters.max_salary, filters.salary_currency)
 
 
 async def _rank_with_llm(
@@ -107,6 +132,9 @@ async def _rank_with_llm(
     pool: list[candidates.RankableCandidate],
     required: ranking.WorkMode | None,
     progress: Progress,
+    *,
+    budget: ranking.Budget | None,
+    home_country: str | None,
 ) -> list[SemanticMatch] | None:
     """The pool ordered by the LLM's judgements, or None when the AI ranking is unavailable
     (no key, budget used up, provider error or timeout); the caller then falls back."""
@@ -121,7 +149,9 @@ async def _rank_with_llm(
     answer = ranking.cached_answer(key)
     if answer is not None:
         await progress.done("ranking", "Same search as earlier, ready instantly")
-        return ranking.rank_by_judgements(answer, pool, required)
+        return ranking.rank_by_judgements(
+            answer, pool, required, budget=budget, home_country=home_country
+        )
     running = _rankings_running.get(key)
     try:
         if running is not None:
@@ -135,7 +165,9 @@ async def _rank_with_llm(
         await progress.done("ranking", "AI ranking unavailable, kept the search order")
         return None
     await progress.done("ranking", "Every profile judged")
-    return ranking.rank_by_judgements(answer, pool, required)
+    return ranking.rank_by_judgements(
+        answer, pool, required, budget=budget, home_country=home_country
+    )
 
 
 # Rankings being judged right now, by cache key, so identical searches share one paid call.
@@ -235,13 +267,17 @@ def _understood_words(understood: HardFilters | None) -> str | None:
     )
     years = understood.min_years
     years_words = f"{years.normalize():f}+ years" if years is not None else None
+    parts = []
     if place and years_words:
-        return f"Looking first in {place}, {years_words}"
-    if place:
-        return f"Looking first in {place}"
-    if years_words:
-        return f"Looking first at people with {years_words}"
-    return None
+        parts.append(f"Looking first in {place}, {years_words}")
+    elif place:
+        parts.append(f"Looking first in {place}")
+    elif years_words:
+        parts.append(f"Looking first at people with {years_words}")
+    if understood.max_salary is not None:
+        # Said back because, unlike place and years, it filters people out.
+        parts.append(f"budget up to {understood.max_salary:,} {understood.salary_currency}")
+    return "; ".join(parts) or None
 
 
 async def _embed_query(
@@ -305,8 +341,9 @@ async def search_by_meaning(
         keyword_text=params.q,
         brief=params.q,
         required=ranking.required_work_mode(params.q),
-        filters=params,
+        filters=_with_budget(params, understood),
         understood=understood,
+        home_country=params.country or (understood.country if understood else None),
         limit=params.limit,
         progress=progress,
     )
@@ -329,8 +366,10 @@ async def search_by_meaning(
                 **_counts(result),
             },
         )
+        # Saved for its owner, so the page can reopen it for free (see history.py).
+        saved_id = await history.save_search(session, actor.user_id, params, result)
     logger.info("semantic_search_completed", **_counts(result))
-    return result
+    return result.model_copy(update={"saved_search_id": saved_id})
 
 
 # Jobs store "onsite"; the ranking's work-mode rule calls it "office".
@@ -341,26 +380,18 @@ _JOB_WORK_MODES: dict[str, ranking.WorkMode] = {
 }
 
 
-def _pay_line(job: jobs.JobBrief) -> str:
-    if job.salary_currency is None:
-        return ""
-    if job.salary_min is not None and job.salary_max is not None:
-        pay = f"{job.salary_min}-{job.salary_max}"
-    elif job.salary_max is not None:
-        pay = f"up to {job.salary_max}"
-    else:
-        pay = f"from {job.salary_min}"
-    return f"\nPay: {pay} {job.salary_currency} per year."
-
-
 def job_filters(job: jobs.JobBrief) -> HardFilters:
     """The job's own requirements as hard filters (user decision): the city only binds a
-    hybrid or onsite job, since a remote one can be done from anywhere in its country."""
+    hybrid or onsite job, since a remote one can be done from anywhere in its country. The top
+    of the pay range is the budget; a range with no top has no cap."""
+    has_cap = job.salary_max is not None
     return HardFilters(
         min_years=job.min_years,
         skill=", ".join(job.must_have_skills),
         city=job.city if job.work_mode != "remote" else None,
         country=job.country_code,
+        max_salary=job.salary_max,
+        salary_currency=job.salary_currency if has_cap else None,
     )
 
 
@@ -371,7 +402,8 @@ async def match_job(
     progress: Progress | None = None,
 ) -> SemanticSearchResult:
     """Candidates for a job: its stored embedding plus full text fetch them, the LLM ranks them
-    against the job (pay included), then the job's requirements split the list."""
+    against the job (never its pay), then the job's requirements, budget included, split the
+    list."""
     progress = progress or Progress()
     job = await jobs.get_job_brief(session, job_id)
     model = get_settings().embedding_model
@@ -388,9 +420,10 @@ async def match_job(
         vector=vector,
         embedding_model=model,
         keyword_text=keywords,
-        brief=job.search_document + _pay_line(job),
+        brief=job.search_document,
         required=_JOB_WORK_MODES[job.work_mode],
         filters=job_filters(job),
+        home_country=job.country_code,
         limit=MAX_RESULTS,
         progress=progress,
     )
@@ -428,6 +461,7 @@ async def _find_rank_and_filter(
     limit: int,
     progress: Progress,
     understood: HardFilters | None = None,
+    home_country: str | None = None,
 ) -> SemanticSearchResult:
     """Hybrid fetch, LLM ranking against `brief`, then the hard filters split the ranked list
     (so both parts keep the ranked order).
@@ -445,6 +479,8 @@ async def _find_rank_and_filter(
             city=applied.city or None,
             country=applied.country,
             source=applied.source or None,
+            max_salary=applied.max_salary,
+            salary_currency=applied.salary_currency,
         )
 
     async def hybrid_ids(within: Select[uuid.UUID] | None) -> list[uuid.UUID]:
@@ -504,7 +540,15 @@ async def _find_rank_and_filter(
         )
 
     search_order = [SemanticMatch(candidate=c.summary, fit=None, criteria=[]) for c in pool]
-    ranked = await _rank_with_llm(session, brief, pool, required, progress)
+    ranked = await _rank_with_llm(
+        session,
+        brief,
+        pool,
+        required,
+        progress,
+        budget=_budget(filters),
+        home_country=home_country,
+    )
     await progress.start("filtering", "Checking your filters")
     result = split(search_order, "search") if ranked is None else split(ranked, "ai")
     perfect = len(result.items)

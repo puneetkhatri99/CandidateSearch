@@ -33,8 +33,19 @@ class Settings(BaseSettings):
     db_echo: bool = False
 
     cors_origins: list[str] = ["http://localhost:5180"]
-    # Raise per route (or move uploads to direct-to-storage) when file uploads arrive.
     max_request_body_bytes: int = 64 * 1024
+    # Resume uploads only (paths in RESUME_UPLOAD_PATHS); ResumeAI's own limit is 10 MB.
+    max_resume_bytes: int = 10 * 1024 * 1024
+
+    # ResumeAI reads resumes and renders the formatted PDF. Without a key, uploads and
+    # "See resume" answer 503; everything else works.
+    resumeai_api_key: SecretStr | None = None
+    resumeai_base_url: str = "https://ai-resume-data-extractor.onrender.com"
+    # Reading a resume takes 5-30 s, longer for a scanned PDF (ResumeAI's guide says 120 s).
+    resumeai_timeout_seconds: float = 120
+    # Per IP on the public form; ResumeAI allows 30 reads an hour from our server in total.
+    resume_upload_limit: int = 10
+    resume_upload_window_seconds: int = 3600
 
     # Version of the privacy notice candidates consent to; bump when the notice text changes.
     privacy_notice_version: str = "2026-10-draft"
@@ -86,6 +97,10 @@ class Settings(BaseSettings):
         # placeholder; both must count as missing rather than fail as a 401 on every call.
         key = self.openai_api_key.get_secret_value().strip() if self.openai_api_key else ""
         return None if not key or key.lower().startswith("sk-change_me") else key
+
+    def usable_resumeai_api_key(self) -> str | None:
+        key = self.resumeai_api_key.get_secret_value().strip() if self.resumeai_api_key else ""
+        return None if not key or key.upper() == "CHANGE_ME" else key
 
     @property
     def is_production(self) -> bool:

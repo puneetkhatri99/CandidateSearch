@@ -1,4 +1,6 @@
 export { ProfileFields } from './components/ProfileFields'
+export { ReadingResume, ResumeUpload } from './components/ResumeUpload'
+export { MAX_RESUME_BYTES, RESUME_FILE_TYPES } from './resume'
 export {
   candidateProfileSchema,
   emptyProfile,

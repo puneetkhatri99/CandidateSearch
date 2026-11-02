@@ -6,10 +6,12 @@ from app.features.candidates.router import router
 from app.features.candidates.schemas import CandidateCreate, CandidateCreated, CandidateSummary
 from app.features.candidates.service import (
     RankableCandidate,
+    attach_resume,
     candidate_ids_passing,
     create_candidate,
     full_text_candidate_ids,
     get_rankable_candidates,
+    get_resume_ref,
     rebuild_search_documents,
 )
 
@@ -20,10 +22,12 @@ __all__ = [
     "CandidateSummary",
     "RankableCandidate",
     "admin_router",
+    "attach_resume",
     "candidate_ids_passing",
     "create_candidate",
     "full_text_candidate_ids",
     "get_rankable_candidates",
+    "get_resume_ref",
     "rebuild_search_documents",
     "router",
 ]

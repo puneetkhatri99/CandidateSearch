@@ -677,3 +677,56 @@ A running log of things learned about this project: decisions, gotchas, provider
   - Unrelated, found while testing: `hnsw.ef_search` must be 1 to 1,000, so `nearest_neighbours` would fail with `count` > 1,000. The app asks for 100.
   - Still open: the ranking judged New Delhi as "partial" location for Ghaziabad in some rows (it is commutable), so only 2 NCR people made the top 25. `rank_v6` has had no evaluation run, because there is still no `backend/evals`.
 - **Impact / action:** Any new paid call started from the page should also skip the abort signal, and get the same sharing on the server if it can be repeated. One query on seeded data is not an evaluation: `backend/evals` still doesn't exist, so `rank_v4` and `understand_v1` have had no eval run (RULES §8).
+
+### 2026-11-02: Skills and budget first; budget is a hard filter checked by code
+- **Context:** The user said a perfect candidate is best in skills and within budget. Experience comes second. Location comes second only for remote roles; otherwise it sits with skills. Before this, budget was the third sort step, and the AI judged it.
+- **Learning:**
+  - **User decisions:**
+    - over budget goes to "Filtered out" (a hard filter);
+    - no stated salary counts as within budget;
+    - for a remote role, the wanted country breaks ties (same country first).
+  - **Budget source:** the job's `salary_max` (a range with no top has no cap), or the search text read by `understand_v3` ("under 25 LPA" gives 2500000 INR). A budget without a currency is dropped, rather than dropping the city and years along with it.
+  - **Applying it:** unlike the understood city and years, an understood budget filters people out, so the first progress step says it back.
+  - **Different currencies pass** (no exchange rates, no new dependency), with the note "Expects in USD, can't compare".
+  - **Fetch:** the shortlist fetch already runs among people who pass the filters, so within-budget people fill the 100 places with no new fetch code.
+  - **Pay leaves the AI prompt:** `rank_v7` drops `search_states_pay`, `salary` and `salary_note`, and the job brief loses its pay line. So pay is no longer sent to OpenAI, and each answer is shorter (not measured).
+  - **Tests:** the tests that encoded the old order (pay as the third sort step, AI salary verdicts, salary in the prompt) were replaced, because the requirement changed. They were not weakened.
+  - **Frontend:** `FILTER_NAMES` drives the URL and the filter inputs, so the budget is not one of them. The frontend has a separate `FailedFilter` type, labelled "Budget".
+- **Impact / action:** `rank_v7` and `understand_v3` have had no evaluation run (no `backend/evals`). The draft privacy notice still says salary goes to OpenAI; that is now stricter than needed, not wrong for the earlier data.
+
+### 2026-11-02: Candidate bookmarks are one list shared by the team
+- **Context:** The user asked for favourites/bookmarks and chose a shared team list on its own sidebar page.
+- **Learning:**
+  - `candidate_bookmarks` has one row per candidate (`candidate_id` UNIQUE), so a star is team-wide and `INSERT ... ON CONFLICT DO NOTHING` keeps the first adder. Both foreign keys cascade: deleting a candidate removes its star, and the e2e teardown (which deletes users) needs no new step. Migration `e7a1c3f5b9d2` is applied to the dev DB.
+  - `GET /admin/candidates/bookmarks` must be declared before `/{candidate_id}`, or FastAPI reads "bookmarks" as an id and answers 422.
+  - The list is unpaged, which breaks RULES §5 (cursor pagination) on purpose: the stars on every page need the whole set of ids, and a team list stays in the hundreds. It is marked `shortcut:`; page it with the created_at cursor helpers if it grows.
+  - The list shows names and emails, so it writes a `candidate.search` audit row (`filters: ["bookmarked"]`). Adding and removing write `candidate.bookmark` / `candidate.unbookmark` only when a row actually changed.
+  - The frontend bookmark key sits under `['candidates', 'bookmarks']`, outside `['candidates', 'search']` and the AI result keys, so starring never re-runs a paid search. Test doubles that answer `{}` to every non-search URL must answer the bookmarks call with `{"items": []}`.
+- **Impact / action:** Personal favourites or several named lists would need an owner column and a new decision.
+
+### 2026-11-02: Resume upload and the formatted resume go through ResumeAI
+- **Context:** The user asked for resume upload that fills the profile form, and a "See resume" button showing a formatted resume. Both use ResumeAI, the user's own service (`https://ai-resume-data-extractor.onrender.com`). The user chose upload on the public form, on Add candidate and on existing profiles, and asked for the privacy notice to name ResumeAI.
+- **Learning:**
+  - ResumeAI stores extracted data under a `(candidate_id, resume_id)` pair we choose and renders the PDF from it, so we keep no file and no extracted data: only `candidates.resume_ref` (migration `f3b8d1a6c2e4`, applied to the dev DB). This departs from RULES §7 "store raw payloads first"; there is no object storage running, and ResumeAI is the store. A re-upload reuses the ref, so ResumeAI replaces the old data.
+  - The upload is the raw request body, not multipart, because FastAPI needs `python-multipart` for forms and it isn't installed. The two upload routes get a 10 MB body limit through `BodySizeLimitMiddleware(upload_paths=...)`; everything else keeps 64 KB.
+  - ResumeAI's limits are per IP, and every call comes from our server's IP, so all users share its 30 reads an hour. The public endpoint has its own per-IP limit (10 an hour) and needs the fetch header, so a cross-site page can't use up that quota.
+  - No retries on ResumeAI calls (RULES §7 asks for tenacity on raw HTTP): a person starts each call and can retry, and a failed read still counts against ResumeAI's limit. The hosted service can be slow after idling, which is why the timeout is 120 s.
+  - A ref given back by the public endpoint is unguessable (UUID4) but isn't signed. Someone who learned another person's ref could submit it with their own profile; refs are never shown in the UI.
+  - **The privacy notice changed** (resumes are sent to ResumeAI), but `PRIVACY_NOTICE_VERSION` wasn't bumped, because the notice is still a draft.
+- **Impact / action:** Set `RESUMEAI_API_KEY` in `backend/.env` and restart the API; until then both features answer 503 "isn't set up". e2e has no ResumeAI key, so upload isn't covered there.
+
+### 2026-11-02: Saved searches, and a search that stays until Clear
+- **Context:** After opening a profile from AI results and going back, the search was gone. The user asked for every search to be saved with its results (starred ones kept, in Settings), and for the search on screen to stay until Clear or a new search.
+- **Learning:**
+  - **Why it was lost.** The profile's "← Back to candidates" link and the sidebar go to a bare `/admin/candidates`, but the search lives in the URL (`?q=`). Results were also only in the React Query cache (gone after about 5 minutes or a refresh), so getting them back meant paying for the search again.
+  - **User decisions.** Every search is saved; each person sees only their own; the newest 50 un-starred are kept; starred stay; the current search survives a refresh.
+  - **Where it lives.** History stays inside `semantic_search`: a separate feature would have to import `SemanticMatch` back and create a circular import. Each shown card is a `saved_search_matches` row with `ON DELETE CASCADE` to `candidates`, so deleting a candidate also deletes the AI's saved notes about them, with no cross-feature code.
+  - **How a search is reopened.**
+    - The URL carries `search=<saved id>`, so reopening is a free GET.
+    - `localStorage` (`candidateSearch.lastSearch`) holds only that URL, so a bare `/admin/candidates` redirects to it.
+    - The redirect happens in a wrapper before the page mounts. Otherwise the search box's `useState` would already be initialised empty.
+  - **Gotchas.**
+    - `startSearch(q)` changes `q` and drops `search=` in one `setSearchParams` call, because two functional updates in the same tick can overwrite each other.
+    - jsdom keeps `localStorage` between tests, so `src/test/setup.ts` now clears it after each test; otherwise one test's search would redirect the next.
+  - **Query text is now stored** (`saved_searches.query`) for its owner. Logs and audit rows still never contain it.
+- **Impact / action:** Migration `a9c4e2d7f1b3` (additive) is applied to the dev DB. Job matches are not saved. No e2e flow covers this yet; unit and integration tests do.

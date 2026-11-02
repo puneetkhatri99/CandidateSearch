@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { Meter } from '@/shared/ui'
+import { Meter, useElapsedSeconds } from '@/shared/ui'
 import { STAGES, type Stage, type StageEvent } from '../types'
 
 const LABELS: Record<Stage, string> = {
@@ -49,20 +48,10 @@ function Marker({ status }: { status: Status }) {
   return <span aria-hidden="true" className="size-4 shrink-0 rounded-full border-2 border-border" />
 }
 
-function useSecondsSinceMount() {
-  const [seconds, setSeconds] = useState(0)
-  useEffect(() => {
-    const started = Date.now()
-    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
-    return () => clearInterval(timer)
-  }, [])
-  return seconds
-}
-
 /** Live steps of a streamed search, in a recruiter's words. The quick steps sit on one line; the
  * step under way is the big thing, with a real count once the AI is judging people. */
 export function SearchProgress({ stages, label = 'Search progress' }: { stages: StageEvent[]; label?: string }) {
-  const seconds = useSecondsSinceMount()
+  const seconds = useElapsedSeconds()
   const statuses = STAGES.map((stage, index) => statusOf(stage, stages, index))
   const current = STAGES.find((_, index) => statuses[index] === 'active')
   const latest = current ? [...stages].reverse().find((event) => event.stage === current) : undefined

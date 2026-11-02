@@ -13,6 +13,11 @@ export function SettingsPage() {
   const { data: user } = useCurrentUser()
   const settings: SettingLink[] = [
     {
+      to: '/settings/searches',
+      label: 'Saved searches',
+      description: 'Your past searches and their results; star one to keep it.',
+    },
+    {
       to: '/account/password?next=%2Fsettings',
       label: 'Change password',
       description: 'Set a new password for your own account.',

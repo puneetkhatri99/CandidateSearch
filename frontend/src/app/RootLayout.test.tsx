@@ -35,7 +35,7 @@ describe('RootLayout navigation', () => {
 
     await screen.findByText('Staff Member')
 
-    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Jobs', 'Add job', 'AI spending', 'Settings'])
+    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Bookmarks', 'Jobs', 'Add job', 'AI spending', 'Settings'])
   })
 
   it('marks Settings active on the pages it opens', async () => {

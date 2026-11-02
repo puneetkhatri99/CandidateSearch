@@ -21,6 +21,17 @@ export interface CandidatePage {
   next_cursor: string | null
 }
 
+/** One star on the team's shared bookmark list. */
+export interface Bookmark {
+  candidate: CandidateSummary
+  added_by_name: string
+  added_at: string
+}
+
+export interface BookmarkList {
+  items: Bookmark[]
+}
+
 /** Mirrors backend/app/features/semantic_search/schemas.py. */
 export interface Criterion {
   name: 'skills' | 'location' | 'experience' | 'salary'
@@ -34,7 +45,7 @@ export interface SemanticMatch {
   fit: 'strong' | 'partial' | 'weak' | null
   criteria: Criterion[]
   /** The hard filters this candidate fails; empty for everyone in `items`. */
-  failed_filters: FilterName[]
+  failed_filters: FailedFilter[]
 }
 
 /** One streamed step of a search; mirrors StageEvent in semantic_search/schemas.py. */
@@ -63,6 +74,33 @@ export interface SemanticSearchResult {
   embedding_model: string
   ranking_model: string | null
   prompt_version: string | null
+  /** The saved copy of a search by meaning, reopened for free; null for job matches. */
+  saved_search_id?: string | null
+}
+
+/** One of your past searches; mirrors SavedSearchSummary in semantic_search/schemas.py. */
+export interface SavedSearchSummary {
+  id: string
+  query: string
+  /** The filters it ran with, by URL name (min_years, skill, city, country, source). */
+  filters: Partial<Record<FilterName, string | number>>
+  result_count: number
+  filtered_out_count: number
+  starred: boolean
+  created_at: string
+}
+
+export interface SavedSearchPage {
+  items: SavedSearchSummary[]
+  next_cursor: string | null
+}
+
+export interface SavedSearchDetail {
+  query: string
+  filters: SavedSearchSummary['filters']
+  starred: boolean
+  created_at: string
+  result: SemanticSearchResult
 }
 
 export interface ExperienceDetail {
@@ -109,6 +147,8 @@ export interface CandidateDetail {
   source: string
   consent_given_at: string
   consent_version: string
+  /** A resume was uploaded, so the formatted resume can be opened. */
+  has_resume: boolean
   created_at: string
   updated_at: string
 }
@@ -116,12 +156,15 @@ export interface CandidateDetail {
 /** Hard filters; the same names on the candidate list and the search endpoint. */
 export const FILTER_NAMES = ['min_years', 'skill', 'city', 'country', 'source'] as const
 export type FilterName = (typeof FILTER_NAMES)[number]
-export const FILTER_LABELS: Record<FilterName, string> = {
+/** The budget comes from a job's pay range or the search text, never from a filter input. */
+export type FailedFilter = FilterName | 'max_salary'
+export const FILTER_LABELS: Record<FailedFilter, string> = {
   min_years: 'Min years',
   skill: 'Skills',
   city: 'City',
   country: 'Country',
   source: 'Source',
+  max_salary: 'Budget',
 }
 
 /** Search state as strings, exactly as it lives in the URL; '' means "not set". */

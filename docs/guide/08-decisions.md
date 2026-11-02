@@ -17,9 +17,9 @@ LinkedIn forbids it and has sued over it. Candidates come from our own form and 
 **Where:** `candidates/repository.search_candidates`; migration `d2b7e4a1c9f6`. Bringing lookup back is a new decision.
 
 ### Salary is yearly, whole units, with one of 8 currencies
-**Decision (user):** salary is a yearly amount plus a currency, and the AI judges it.
+**Decision (user):** salary is a yearly amount plus a currency. ~~The AI judges it.~~ Since 2026-11-02 code checks it as a hard filter (over budget → "Filtered out"; no stated salary and another currency pass), and pay is no longer sent to OpenAI.
 **Why 8 currencies:** the forms offer 8. Accepting more would store values the edit form can't show or save.
-**Where:** `shared/validation.YearlySalary`, `CURRENCY_CODES`, `ranking.judge_salary`.
+**Where:** `shared/validation.YearlySalary`, `CURRENCY_CODES`, `ranking.salary_criterion`, `candidates.repository.hard_filter_clauses`, `semantic_search.service.failed_filters`.
 
 ## Architecture
 
@@ -102,10 +102,10 @@ See [02-architecture.md](02-architecture.md). Everything about one capability is
 **Where:** `candidates/models.SEARCH_TSV_EXPRESSION` (includes the city), `repository.full_text_candidate_ids` (words OR-ed so partial matches still rank).
 
 ### The LLM judges, code orders
-**Decision (user):** skills and location first, then skills band, pay, experience band, and finally actual years (more first, fewer for a junior search).
-**Why:** the same judgements always give the same order, and plain rules (work-mode compatibility, "relocation must be stated") aren't left to the model.
+**Decision (user, 2026-11-02):** skills first, with location beside them unless the role is remote; then skills band, experience band, for remote roles the wanted country, and finally actual years (more first, fewer for a junior search). Budget is a hard filter, not part of the order.
+**Why:** the same judgements always give the same order, and plain rules (work-mode compatibility, "relocation must be stated", money comparisons) aren't left to the model.
 **Why bands (20 points wide):** the model's scores wobble by a few points. Sorting on the exact score let a 92 with 5 years beat an 85 with 15 years, so experience almost never counted.
-**Where:** `ranking.to_match`, `rank_by_judgements`, `judge_location`, `judge_salary`, `fits_work_mode`.
+**Where:** `ranking.to_match`, `rank_by_judgements`, `judge_location`, `salary_criterion`, `fits_work_mode`.
 
 ### "Does the search name a place / state pay?" is asked once per search
 **Why:** inferring it from any one candidate's verdict let one odd answer change the scoring for all 20.

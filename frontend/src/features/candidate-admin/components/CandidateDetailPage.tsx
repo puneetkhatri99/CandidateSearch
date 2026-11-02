@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useCurrentUser } from '@/features/auth'
 import { ApiError } from '@/shared/api/client'
 import { Alert, Button, PageHeader } from '@/shared/ui'
 import { useCandidate, useDeleteCandidate } from '../hooks'
+import { BookmarkButton } from './BookmarkButton'
 import { CandidateEditForm } from './CandidateEditForm'
 import { CandidateProfileView } from './CandidateProfileView'
 import { DeleteCandidateDialog } from './DeleteCandidateDialog'
+import { ResumeBar } from './ResumeBar'
 
 const backLink = (
   <Link to="/admin/candidates" className="w-fit rounded-xs text-sm text-accent-fg underline-offset-4 hover:underline">
@@ -21,6 +23,8 @@ export function CandidateDetailPage() {
   const candidate = useCandidate(id)
   const deletion = useDeleteCandidate()
   const [searchParams] = useSearchParams()
+  // Set by the Add candidate page, so the new profile says what just happened.
+  const justCreated = useLocation().state as { created?: boolean; withResume?: boolean } | null
   // The table's Edit action links here with ?edit=1 to open the form directly.
   const [editing, setEditing] = useState(searchParams.get('edit') === '1')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -55,6 +59,7 @@ export function CandidateDetailPage() {
         actions={
           !editing && (
             <>
+              <BookmarkButton candidate={{ ...c, top_skills: c.skills.slice(0, 5) }} />
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 Edit
               </Button>
@@ -67,6 +72,15 @@ export function CandidateDetailPage() {
           )
         }
       />
+
+      {justCreated?.created && !editing && (
+        <Alert tone="success">
+          Candidate added.{' '}
+          {justCreated.withResume ? 'Their resume is attached: open the formatted version with See resume.' : 'You can attach a resume below.'}
+        </Alert>
+      )}
+
+      {!editing && <ResumeBar candidate={c} />}
 
       {editing ? (
         <CandidateEditForm

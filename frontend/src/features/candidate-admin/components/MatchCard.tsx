@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import { formatSalary } from '@/shared/format'
 import { Stamp, type StampTone } from '@/shared/ui'
 import { type CandidateSummary, type Criterion, FILTER_LABELS, type SemanticMatch } from '../types'
+import { BookmarkButton } from './BookmarkButton'
 
 type Fit = NonNullable<SemanticMatch['fit']>
 const FIT_LABELS: Record<Fit, string> = { strong: 'Strong match', partial: 'Partial match', weak: 'Weak match' }
@@ -49,7 +50,8 @@ export function MatchCard({ match, rank, onDelete }: MatchCardProps) {
             {c.full_name}
           </Link>
           {match.fit && <Stamp tone={FIT_TONES[match.fit]}>{FIT_LABELS[match.fit]}</Stamp>}
-          <div className="ml-auto flex gap-4 text-sm">
+          <div className="ml-auto flex items-center gap-4 text-sm">
+            <BookmarkButton candidate={c} />
             <Link
               to={`/admin/candidates/${c.id}?edit=1`}
               className="rounded-xs font-medium text-fg-muted underline-offset-4 hover:text-fg hover:underline"

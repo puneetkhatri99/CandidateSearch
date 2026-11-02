@@ -129,6 +129,8 @@ One section per feature in `backend/app/features/`. Inside each: endpoints, then
 | `POST /api/v1/admin/candidates` | `admin_router.create_candidate` | staff |
 | `PUT /api/v1/admin/candidates/{id}` | `admin_router.update_candidate` | staff |
 | `DELETE /api/v1/admin/candidates/{id}` | `admin_router.delete_candidate` | admin |
+| `GET /api/v1/admin/candidates/bookmarks` | `admin_router.list_bookmarks` | staff (audited like a search). Declared before `/{id}`, which would otherwise read "bookmarks" as an id. |
+| `PUT` / `DELETE /api/v1/admin/candidates/{id}/bookmark` | `admin_router.bookmark_candidate` / `unbookmark_candidate` | staff, 204 |
 
 ### `candidates/service.py`
 
@@ -146,6 +148,9 @@ One section per feature in `backend/app/features/`. Inside each: endpoints, then
 | `create_candidate_by_staff(...)` | Same as public, `source="admin"`, records who captured the consent. |
 | `update_candidate(...)` | Row lock, version check, apply, flush, audit `changed_fields`. A `StaleDataError` from SQLAlchemy's version column also becomes 409. |
 | `delete_candidate(...)` | Admin only. `DELETE ... RETURNING`; children, embeddings and failures go by `ON DELETE CASCADE`. |
+| `bookmark_candidate(session, id, actor)` | Stars the candidate on the **team's shared** list; starring again keeps the first adder. Audits `candidate.bookmark` only when a row was added. Unknown candidate → 404 (the foreign key fails). |
+| `unbookmark_candidate(session, id, actor)` | Anyone may remove a star; removing twice is fine. Audits `candidate.unbookmark` only when a row went. |
+| `list_bookmarks(session, actor)` | Every bookmark, newest first, with the adder's name (`auth.get_full_names`). Unpaged (a `shortcut:`). |
 | `RankableCandidate` | What the ranking may see: summary, the **redacted** profile text, city, country, years, skills, work modes, relocation, salary, `updated_at`. Never name or contact details. |
 | `get_rankable_candidates(session, ids)` | `{id: RankableCandidate}`; deleted ids are simply missing. |
 | `full_text_candidate_ids(session, query, count, within)` | Best keyword matches first. Used by hybrid search. |
@@ -164,6 +169,8 @@ One section per feature in `backend/app/features/`. Inside each: endpoints, then
 | `get_candidates_by_ids(ids)` | One `IN` query. |
 | `full_text_candidate_ids(query, limit, within)` | Builds a tsquery from the text, turns AND into OR (`&` → `|`) so a profile matching 4 of 6 words still ranks, orders by `ts_rank_cd` (normalised by length so long profiles don't win by size). |
 | `delete_candidate(id)` | Returns whether a row was deleted. |
+| `add_bookmark(id, added_by)` | `INSERT ... ON CONFLICT (candidate_id) DO NOTHING RETURNING id`; returns whether a row was added. |
+| `remove_bookmark(id)`, `list_bookmarks()` | `DELETE ... RETURNING`; bookmarks joined to candidates, newest first. |
 
 ### Other candidate files
 
@@ -174,6 +181,7 @@ One section per feature in `backend/app/features/`. Inside each: endpoints, then
 | `schemas.CandidateCreate` / `StaffCandidateCreate` / `CandidateUpdate` | Profile + `consent: true` + honeypot `website` / profile + `consent_confirmed: true` / profile + `version`. |
 | `schemas.CandidateSearchParams` | Query params of the list endpoint (the hard filters, `cursor`, `limit`); blanks become `None`; `limit` max 100. |
 | `models.Candidate` | The table. `search_tsv` is a **generated column** computed by Postgres from `search_document || ' ' || city`. `version` is SQLAlchemy's `version_id_col`, so every UPDATE includes `WHERE version = :old`. CHECK constraints mirror the schema rules. |
+| `models.CandidateBookmark` | `candidate_bookmarks`: one row per starred candidate (`candidate_id` UNIQUE), `added_by`. Both foreign keys `ON DELETE CASCADE`, so deleting a candidate removes its star. |
 
 ---
 
@@ -315,6 +323,12 @@ The full pipeline is explained in [03-flows.md](03-flows.md#6-search-by-meaning)
 | `GET /api/v1/semantic-search/candidates/stream?q=...` | `stream_search_candidates`: SSE |
 | `GET /api/v1/semantic-search/jobs/{id}/candidates` | `match_candidates_to_job`: JSON |
 | `GET /api/v1/semantic-search/jobs/{id}/candidates/stream` | `stream_match_candidates_to_job`: SSE |
+| `GET /api/v1/semantic-search/history?cursor=` | `list_saved_searches`: your own searches, newest first (free) |
+| `GET /api/v1/semantic-search/history/{id}` | `get_saved_search`: one search with its result as ranked (free, no AI call) |
+| `PUT /api/v1/semantic-search/history/{id}/star` | `star_saved_search`: `{"starred": bool}` |
+| `DELETE /api/v1/semantic-search/history/{id}` | `delete_saved_search` |
+
+Another person's saved search answers 404, like a missing one.
 
 It has its own prefix because `/admin/candidates/semantic` would be captured by the `/admin/candidates/{candidate_id}` route.
 
@@ -325,24 +339,37 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 | `looks_personal(query)` | `True` for `@`, `://`, `www.`, or a phone number (`shared.redaction.contains_phone_number`: 10+ digits, the same rule redaction uses). Such queries are refused, because the query is sent to OpenAI. "10 years in 2024" and "budget 2500000 INR" are fine. |
 | `failed_filters(candidate, params)` | Which hard filters a candidate fails, in Python. **Same rules as `candidates.repository.hard_filter_clauses`.** |
 | `_active_filters(params)` | Names of filters that are set. |
-| `_with_understood(filters, understood)` | The recruiter's filters, plus the facts read from the search text where the recruiter set nothing. |
-| `_rank_with_llm(session, query, pool, required, progress)` | Builds the prompt, uses the 10-minute cache if possible, otherwise one metered `gpt-5.4-mini` call; returns ranked matches, or `None` if the AI is unavailable. Empty pool → no call. |
+| `_with_understood(filters, understood)` | The recruiter's filters, plus the facts read from the search text where the recruiter set nothing (used to fetch those people first). |
+| `_with_budget(filters, understood)` | Adds the budget read from the search text as a hard filter, unless one was passed. |
+| `_budget(filters)` | The filters' budget as a `ranking.Budget`, or `None`. |
+| `_rank_with_llm(session, query, pool, required, progress, budget, home_country)` | Builds the prompt, uses the 10-minute cache if possible, otherwise one metered `gpt-5.4-mini` call; returns ranked matches, or `None` if the AI is unavailable. Empty pool → no call. |
 | `_profiles(count)` | "1 profile" / "5 profiles" for progress messages. |
 | `_embed_query(session, provider, query)` | One metered embedding of the query with a 10 s timeout. Failure → 503. |
 | `search_by_meaning(session, params, actor, progress)` | The search entry point: refuse personal-looking queries, embed, `understand_query`, `_find_rank_and_filter`, audit. |
 | `_JOB_WORK_MODES` | Maps job `onsite` to the ranking's `office`. |
-| `_pay_line(job)` | "Pay: 60000-90000 EUR per year." for the LLM brief. |
-| `job_filters(job)` | The job's own requirements as hard filters. City only binds hybrid/onsite jobs. |
-| `match_job(session, job_id, actor, progress)` | The job-matching entry point: uses the stored job vector (no embedding call), keywords from title + skills + city, the job's document + pay as the brief. 409 if the embedding isn't ready. |
+| `job_filters(job)` | The job's own requirements as hard filters, budget (`salary_max`) included. City only binds hybrid/onsite jobs. |
+| `match_job(session, job_id, actor, progress)` | The job-matching entry point: uses the stored job vector (no embedding call), keywords from title + skills + city, the job's document (never its pay) as the brief. 409 if the embedding isn't ready. |
 | `_counts(result)` | Counts for logs and audit. |
 | `_find_rank_and_filter(...)` | The shared pipeline: hybrid fetch (twice when filters are set, once more when facts were read from the text), load rankable profiles, rank, split by filters. |
+
+### `semantic_search/history.py`, `repository.py`, `models.py`
+
+| Name | What it does |
+|---|---|
+| `SavedSearch`, `SavedSearchMatch` | One row per search (owner, query, URL filters, counts, models, `starred`) and one per card shown (section, position, fit, criteria, failed filters). Both cascade: deleting the user, the search or the candidate deletes the rows. |
+| `HISTORY_LIMIT` | 50: un-starred searches kept per person. |
+| `save_search(session, user_id, params, result)` | Inserts both, then `prune_history`. Runs in the caller's transaction (with the audit row). |
+| `list_history(session, actor, cursor)` | Own searches, newest first, `PAGE_SIZE` 50 per page, with result counts. |
+| `get_saved_search(session, actor, id)` | The saved result rebuilt with current summaries from `candidates.get_rankable_candidates`; `SavedSearchNotFoundError` (404) if missing or someone else's. |
+| `star_saved_search`, `delete_saved_search` | Owner only, otherwise 404. |
+| `repository.prune_history(session, user_id, keep)` | Deletes un-starred searches beyond the newest `keep`. |
 
 ### `semantic_search/understanding.py`
 
 | Name | What it does |
 |---|---|
-| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/understand_v2.md`, loaded once. |
-| `QueryFacts` | The JSON the LLM must return: `city`, `country_code`, `min_years`, each null unless the text states it. |
+| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/understand_v3.md`, loaded once. |
+| `QueryFacts` | The JSON the LLM must return: `city`, `country_code`, `min_years`, `max_salary` (yearly, whole units) and `salary_currency`, each null unless the text states it. A budget without its currency is dropped. |
 | `understand_query(session, query)` | One metered `gpt-5.4-mini` call with a 10 s timeout, about $0.0004. The answer is checked through `HardFilters`, then cached for 10 minutes. Any failure logs the class name and returns `None`, and the search carries on. |
 | `clear_understanding_cache()` | Empties the cache (tests). |
 
@@ -350,17 +377,17 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 
 | Name | What it does |
 |---|---|
-| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v6.md`, loaded once. A prompt change gets a new file name. |
+| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v7.md`, loaded once. A prompt change gets a new file name. |
 | `RANK_MODEL` | `gpt-5.4-mini`. |
 | `required_work_mode(query)` | Finds "hybrid", "office/onsite/wfo" or "remote/wfh" in the search text. Hybrid wins if several appear. |
 | `fits_work_mode(candidate_modes, required)` | Office (2) ≥ hybrid (1) ≥ remote (0): a candidate fits if they accept at least as much office time as the role needs. |
 | `fuse(*lists, count)` | Reciprocal rank fusion: each list gives `1 / (60 + position)` to each id; sum and sort. Being near the top of either list, or in both, ranks high. Ties are broken by id so the order is stable. |
 | `CandidateJudgement`, `RankingAnswer` | The exact JSON shape the LLM must return. |
-| `build_prompt(query, pool)` | "Search: ..." plus a numbered JSON list of anonymised profiles (redacted text, city, country, years, work modes, relocation, expected salary). Candidates are numbers, not ids or names. |
-| `judge_location(judgement, candidate, required, place_named)` | Location points and note, with code guards (work-mode rule, place named, relocation must be stated). |
-| `judge_salary(judgement, candidate, pay_named)` | Salary verdict and points, with guards (no stated salary → unknown). |
-| `to_match(...)` | One judgement → a sort key `(skills+location, skills band, salary points, experience band, years)` and the `SemanticMatch` with readable criteria. Fit: strong (2 points), partial (1), weak. |
-| `rank_by_judgements(answer, pool, required)` | Sorts the pool by those keys; ties keep the hybrid order; unjudged candidates go last instead of disappearing. |
+| `build_prompt(query, pool)` | "Search: ..." plus a numbered JSON list of anonymised profiles (redacted text, city, country, years, work modes, relocation). No pay. Candidates are numbers, not ids or names. |
+| `judge_location(judgement, candidate, required, place_named, home_country)` | Location points and note, with code guards (work-mode rule, place named, relocation must be stated). For a remote role it uses the stored country: 1 in `home_country`, 0.5 outside it. |
+| `Budget`, `salary_criterion(candidate, budget)` | The budget, and the salary line a recruiter reads (met / missed / "No expected salary stated" / "Expects in USD, can't compare"). Over budget is filtered by `failed_filters`, not here. |
+| `to_match(...)` | One judgement → a sort key `(skills + location unless remote, skills band, experience band, remote country, years)` and the `SemanticMatch` with readable criteria. Fit: strong (every must met), partial (one), weak. |
+| `rank_by_judgements(answer, pool, required, budget, home_country)` | Sorts the pool by those keys; ties keep the hybrid order; unjudged candidates go last instead of disappearing. |
 | `cache_key`, `cached_answer`, `remember_answer`, `clear_ranking_cache` | An in-memory cache (128 entries, 10 minutes) keyed by model, prompt version, query, and each profile's id + `updated_at`. Repeating a search over unchanged profiles costs nothing. Editing a profile changes `updated_at`, so the cache misses. |
 
 ### `semantic_search/progress.py`
@@ -405,5 +432,22 @@ They live at the root, not under `/api/v1`, so load balancers don't depend on AP
 | `GET /api/v1/admin/system` | `system_details` → `service.get_system_details` | For the staff System page, any signed-in staff. Returns the embedding and ranking models and both prompt versions; for candidates and for jobs, how many exist, how many have a vector made from today's document, and how many have a failure recorded for it (`embeddings.get_embedding_counts`); and AI spend against the limit (`ai_usage.get_summary`). Counts, names and money only, never candidate data. |
 
 `health` is the one feature that reads three others (`embeddings`, `ai_usage`, `semantic_search`), always through their `__init__.py`. Nothing imports `health`, so this makes no cycle.
+
+---
+
+## resumes
+
+Reads uploaded resumes with **ResumeAI** (the user's own service, `RESUMEAI_BASE_URL`, key `RESUMEAI_API_KEY`) and shows ResumeAI's formatted resume PDF. We keep no file: ResumeAI keeps the extracted data under a pair we choose, `(resume_ref, "resume")`, and `candidates.resume_ref` stores that UUID.
+
+| Endpoint | Function | Who |
+|---|---|---|
+| `POST /api/v1/resumes` | `router.read_resume` → `service.read_new_resume` | public; needs `X-Requested-With: fetch`; `RESUME_UPLOAD_LIMIT` per IP per hour (default 10). For a profile not saved yet: makes a fresh `resume_ref`, reads the file, returns `{resume_ref, profile}` (suggestions). |
+| `PUT /api/v1/admin/candidates/{id}/resume` | `router.attach_resume` → `service.attach_resume` | staff, 204. Reads the file for a saved candidate and links it; the profile fields and `version` don't change. A replacement reuses the candidate's ref, so ResumeAI overwrites its data. |
+| `GET /api/v1/admin/candidates/{id}/resume` | `router.formatted_resume` → `service.formatted_resume_pdf` | staff. The PDF, `inline; filename="resume.pdf"`, `no-store`; rendered by ResumeAI on every call. 404 without a resume (ResumeAI isn't asked). Audited as `candidate.resume_view`. |
+
+- **The file is the raw request body**, not multipart: FastAPI's form parsing needs `python-multipart`, a new dependency for one field. `BodySizeLimitMiddleware` gives the two upload paths (`resumes.UPLOAD_PATHS`) `MAX_RESUME_BYTES` (10 MB); every other route keeps 64 KB.
+- `client.ResumeAIClient` uses `httpx2` (already installed for OpenAI), with `RESUMEAI_TIMEOUT_SECONDS` (120) and **no retries**: a person pressed the button and can press it again, and a failed read still counts against ResumeAI's 30-an-hour limit. Errors become plain messages: 401 and 402 → 503, 413/415/429 pass through (429 keeps `Retry-After`), 422 shows ResumeAI's sentence only when it is one, other failures → 502, timeouts and connection errors → 503. Only the status code is logged, never ResumeAI's body.
+- `mapping.to_profile` turns ResumeAI's data into form suggestions: dates written like "Jan 2021" or "Present" become `YYYY-MM` and `is_current`, "Pune, India" becomes city + country code, links are sorted into LinkedIn / GitHub / portfolio, skills become tags, years of experience is first start to last end. Anything unreadable stays empty; nothing is guessed. Lengths are cut to the form's limits.
+- `candidates.get_resume_ref` and `candidates.attach_resume` are the only ways `resumes` touches candidate data. A ref that's never saved with a profile leaves unused data at ResumeAI.
 
 Next: [06-frontend.md](06-frontend.md).

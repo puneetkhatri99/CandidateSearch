@@ -15,7 +15,9 @@ def _candidate(
     work_modes: tuple[str, ...] = ("onsite",),
     relocate: bool | None = None,
     salary: int | None = None,
+    currency: str = "INR",
     years: float = 6,
+    country: str = "IN",
 ) -> RankableCandidate:
     payload = valid_candidate_payload()
     summary = CandidateSummary(
@@ -24,11 +26,11 @@ def _candidate(
         email=f"{name.lower()}@example.com",
         headline=payload["headline"],
         city="Ghaziabad",
-        country_code="IN",
+        country_code=country,
         years_experience=6,
         top_skills=["FastAPI"],
         expected_salary=salary,
-        salary_currency=None if salary is None else "INR",
+        salary_currency=None if salary is None else currency,
         source="manual",
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
@@ -36,13 +38,13 @@ def _candidate(
         summary=summary,
         profile_text="Backend engineer. Skills: FastAPI.",
         city="Ghaziabad",
-        country_code="IN",
+        country_code=country,
         years_experience=years,
         skills=("fastapi",),
         work_modes=work_modes,
         open_to_relocation=relocate,
         expected_salary=salary,
-        salary_currency=None if salary is None else "INR",
+        salary_currency=None if salary is None else currency,
         updated_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
@@ -51,20 +53,16 @@ def _answer(
     *,
     judgements: list[CandidateJudgement],
     place: bool = True,
-    pay: bool = False,
     junior: bool = False,
 ) -> RankingAnswer:
     return RankingAnswer(
         search_names_place=place,
-        search_states_pay=pay,
         search_wants_junior=junior,
         judgements=judgements,
     )
 
 
-def _judgement(
-    number: int, skills: int, location: str, experience: int, salary: str = "not_required"
-) -> CandidateJudgement:
+def _judgement(number: int, skills: int, location: str, experience: int) -> CandidateJudgement:
     return CandidateJudgement.model_validate(
         {
             "candidate": number,
@@ -74,8 +72,6 @@ def _judgement(
             "location_note": f"location {number}",
             "experience_score": experience,
             "experience_note": f"experience {number}",
-            "salary": salary,
-            "salary_note": f"salary {number}",
         }
     )
 
@@ -120,26 +116,62 @@ def test_location_not_required_is_ignored_when_the_search_names_a_place() -> Non
     assert ranked[1].criteria[1].status == "missed"
 
 
-def test_pay_comes_after_the_skills_score_and_before_experience() -> None:
-    pricey, affordable, stronger = (
-        _candidate("Pricey", salary=3_000_000),
-        _candidate("Fits", salary=1_800_000),
-        _candidate("Stronger", salary=3_000_000),
-    )
+BUDGET = ranking.Budget(2_400_000, "INR")
+
+
+def test_the_salary_criterion_is_checked_by_code_against_the_budget() -> None:
+    # User decision 2026-11-02: over budget is filtered out (failed_filters), no stated salary
+    # counts as within, and another currency can't be compared.
+    pool = [
+        _candidate("Within", salary=1_800_000),
+        _candidate("Over", salary=3_000_000),
+        _candidate("Unstated"),
+        _candidate("Dollars", salary=90_000, currency="USD"),
+    ]
+    answer = _answer(judgements=[_judgement(n, 90, "same_city", 90) for n in range(1, 5)])
+
+    ranked = ranking.rank_by_judgements(answer, pool, None, budget=BUDGET)
+
+    salary = {m.candidate.full_name: m.criteria[3] for m in ranked}
+    assert {name: (c.name, c.status, c.note) for name, c in salary.items()} == {
+        "Within": ("salary", "met", "Expects 1,800,000 INR, budget 2,400,000 INR"),
+        "Over": ("salary", "missed", "Expects 3,000,000 INR, budget 2,400,000 INR"),
+        "Unstated": ("salary", "partial", "No expected salary stated"),
+        "Dollars": ("salary", "partial", "Expects in USD, can't compare"),
+    }
+    # Pay is never part of the order; the filter handles it, so the hybrid order stands.
+    assert [m.candidate.full_name for m in ranked] == ["Within", "Over", "Unstated", "Dollars"]
+
+
+def test_remote_location_only_breaks_ties_with_the_wanted_country_first() -> None:
+    abroad = _candidate("Abroad", work_modes=("remote",), country="DE")
+    home = _candidate("Home", work_modes=("remote",))
+    stronger_abroad = _candidate("StrongerAbroad", work_modes=("remote",), country="DE")
     answer = _answer(
-        pay=True,
         judgements=[
-            _judgement(1, 65, "same_city", 95, salary="above"),
-            _judgement(2, 65, "same_city", 60, salary="within"),
-            _judgement(3, 95, "same_city", 40, salary="above"),
-        ],
+            _judgement(1, 85, "elsewhere", 70),
+            _judgement(2, 85, "elsewhere", 70),
+            _judgement(3, 85, "elsewhere", 90),  # a higher experience band
+        ]
     )
 
-    ranked = ranking.rank_by_judgements(answer, [pricey, affordable, stronger], None)
+    ranked = ranking.rank_by_judgements(
+        answer, [abroad, home, stronger_abroad], "remote", home_country="IN"
+    )
 
-    # Better skills win over budget; with equal skills, within budget beats more experience.
-    assert [m.candidate.full_name for m in ranked] == ["Stronger", "Fits", "Pricey"]
-    assert (ranked[2].criteria[3].name, ranked[2].criteria[3].status) == ("salary", "missed")
+    # Better experience still wins; the country only decides between otherwise equal people,
+    # and being abroad never costs a remote candidate their "strong" fit.
+    assert [m.candidate.full_name for m in ranked] == ["StrongerAbroad", "Home", "Abroad"]
+    assert {m.fit for m in ranked} == {"strong"}
+    location = {m.candidate.full_name: m.criteria[1] for m in ranked}
+    assert (location["Home"].status, location["Home"].note) == (
+        "met",
+        "Remote role, based in India",
+    )
+    assert (location["Abroad"].status, location["Abroad"].note) == (
+        "partial",
+        "Remote role, based outside India",
+    )
 
 
 def test_more_experienced_people_win_among_similar_skills() -> None:
@@ -193,43 +225,20 @@ def test_a_real_gap_in_skills_or_experience_still_beats_years() -> None:
     assert [m.candidate.full_name for m in ranked] == ["Best", "Misfit", "WeakerSkills"]
 
 
-def test_one_odd_verdict_does_not_decide_place_or_pay_for_everyone() -> None:
-    # The search names no place and no pay, but the LLM answered "elsewhere" and "above" for
-    # one candidate. Only the search-level answers count, so nobody is marked down.
+def test_one_odd_verdict_does_not_decide_place_for_everyone() -> None:
+    # The search names no place, but the LLM answered "elsewhere" for one candidate. Only the
+    # search-level answer counts, so nobody is marked down.
     answer = _answer(
         place=False,
-        pay=False,
-        judgements=[
-            _judgement(1, 90, "elsewhere", 90, salary="above"),
-            _judgement(2, 90, "not_required", 90),
-        ],
-    )
-
-    ranked = ranking.rank_by_judgements(answer, [_candidate("A", salary=10), _candidate("B")], None)
-
-    assert {m.fit for m in ranked} == {"strong"}
-    assert all(len(m.criteria) == 3 for m in ranked)
-
-
-def test_salary_without_a_stated_expectation_is_unknown_not_a_guess() -> None:
-    answer = _answer(
-        pay=True,
-        judgements=[
-            _judgement(1, 90, "same_city", 90, salary="within"),
-            _judgement(2, 90, "same_city", 90, salary="not_required"),
-        ],
+        judgements=[_judgement(1, 90, "elsewhere", 90), _judgement(2, 90, "not_required", 90)],
     )
 
     ranked = ranking.rank_by_judgements(answer, [_candidate("A"), _candidate("B")], None)
 
-    # A states no expectation; for B the search states pay, so "not required" can't stand.
-    assert [(m.criteria[3].status, m.criteria[3].note) for m in ranked] == [
-        ("partial", "No expected salary stated"),
-        ("partial", "No expected salary stated"),
-    ]
+    assert {m.fit for m in ranked} == {"strong"}
 
 
-def test_no_salary_criterion_when_pay_is_not_asked() -> None:
+def test_no_salary_criterion_without_a_budget() -> None:
     answer = _answer(judgements=[_judgement(1, 90, "same_city", 90)])
 
     [match] = ranking.rank_by_judgements(answer, [_candidate("A", salary=10)], None)
@@ -237,10 +246,12 @@ def test_no_salary_criterion_when_pay_is_not_asked() -> None:
     assert [c.name for c in match.criteria] == ["skills", "location", "experience"]
 
 
-def test_the_prompt_carries_the_expected_salary_but_no_identity() -> None:
+def test_the_prompt_carries_no_pay_and_no_identity() -> None:
+    # Budget is checked by code, so a salary never needs to reach OpenAI.
     prompt = ranking.build_prompt("job", [_candidate("Secret Name", salary=1_800_000)])
 
-    assert '"expected_yearly_salary": "1800000 INR"' in prompt
+    assert "1800000" not in prompt
+    assert "salary" not in prompt
     assert "Secret Name" not in prompt
 
 

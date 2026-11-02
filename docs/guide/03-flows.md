@@ -89,6 +89,23 @@ candidates/router.py  submit_candidate
 
 Nothing is "queued" for embedding. The new candidate simply has no vector yet, so the background scan finds it within ~2 seconds (flow 4).
 
+### Uploading a resume while filling in the form
+
+The public form and **Add candidate** both start with an optional Resume section (`ResumeUpload`).
+
+```
+browser: choose a file (≤ 10 MB, PDF / DOC / DOCX / TXT)
+  └─ POST /api/v1/resumes   raw file as the body
+       resumes.service.read_new_resume
+         ├─ resume_ref = new UUID
+         ├─ ResumeAI POST /api/public/resumes  (candidate_id = resume_ref, resume_id = "resume")   5-30 s
+         └─ mapping.to_profile → suggestions
+browser: fillFromResume fills only the fields still empty, says which, and keeps resume_ref in the form
+  └─ submit → POST /api/v1/candidates (or /admin/candidates) with resume_ref → stored on the candidate
+```
+
+On a saved profile, **Upload resume** (`PUT .../{id}/resume`) does the same read but changes no profile field, and **See resume** opens `GET .../{id}/resume` in a new tab, which asks ResumeAI to render the formatted PDF.
+
 ---
 
 ## 3. Staff edit a candidate
@@ -231,22 +248,23 @@ semantic_search/service.py  search_by_meaning
 
 The LLM only **judges**. Our code **orders** (`ranking.to_match` and `rank_by_judgements`). That makes the order reproducible and keeps simple rules out of the model's hands.
 
-For each candidate the LLM returns: `skills_score` (0-100), a `location` verdict, `experience_score`, a `salary` verdict, and short notes. Once per search it also says `search_names_place`, `search_states_pay` and `search_wants_junior` (the role itself is junior or entry-level, not a senior role that mentors juniors).
+For each candidate the LLM returns: `skills_score` (0-100), a `location` verdict, `experience_score`, and short notes. Once per search it also says `search_names_place` and `search_wants_junior` (the role itself is junior or entry-level, not a senior role that mentors juniors). It never sees pay: the budget is a hard filter checked by code (below).
 
-The sort key, highest first:
+The sort key, highest first (user decision 2026-11-02: skills and budget come first, location only when the role isn't remote, experience second):
 
-1. **skills met** (score ≥ 60 → 1 point) **+ location points** (1 met, 0.5 partial, 0 missed)
+1. **skills met** (score ≥ 60 → 1 point) **+ location points** (1 met, 0.5 partial, 0 missed), the location part only when the role is **not remote**
 2. skills score, in bands 20 points wide (a few points' difference is noise)
-3. salary points (only when the search or job states pay)
-4. experience score, in the same bands
+3. experience score, in the same bands
+4. for a remote role only: in the wanted country (the job's country, or the search's) before outside it
 5. actual years of experience: more years first, or fewer when `search_wants_junior`
+
+**Budget** is a hard filter, so over-budget people go to "Filtered out" with "Fails filter: Budget". It comes from the job's `salary_max` (a range with no top has no cap), or from the search text ("under 25 LPA", read by `understanding`), unless a `max_salary` was passed explicitly. Only a stated salary **in the same currency** above the budget fails; no stated salary and another currency both pass (there are no exchange rates). The salary criterion on each card is built by code: "Expects 1,800,000 INR, budget 2,400,000 INR".
 
 Code-level guards on the LLM's answers:
 
 - **Work mode is plain logic** (`fits_work_mode`): someone who accepts office work fits office, hybrid and remote roles; hybrid fits hybrid and remote; remote fits remote only.
 - If the search names a place, a `not_required` location verdict counts as missed (it once let a remote-working Berlin profile outrank a local one).
 - "Willing to relocate" only counts if the profile actually says `open_to_relocation = true`.
-- A salary verdict of `within`/`above` for a candidate with no stated salary becomes `unknown`.
 - A candidate the LLM forgot to judge is kept at the bottom, not dropped.
 
 ### Why filter after ranking?
@@ -255,9 +273,34 @@ The recruiter asked to see strong candidates that a filter removed. So filters d
 
 ### A place typed in the search text
 
-`understanding.understand_query` makes one small LLM call that reads the city, country and minimum years the text states. Skills are left out on purpose: vectors and full text handle them, and exact tags would lose people tagged differently.
+`understanding.understand_query` makes one small LLM call that reads the city, country, minimum years and budget (yearly amount + currency) the text states. Skills are left out on purpose: vectors and full text handle them, and exact tags would lose people tagged differently.
 
-People who fit those facts take the first places in the shortlist, and everyone else fills the rest. The facts are **not filters**: they never add a "Fails filter" or remove anyone from the results, and a filter the recruiter set wins over them. If the call fails, the search runs without the facts. The answer is cached for 10 minutes, because a different answer on a repeat would change the shortlist and pay for a new ranking.
+People who fit the city, country and years take the first places in the shortlist, and everyone else fills the rest. Those three are **not filters**: they never add a "Fails filter" or remove anyone, and a filter the recruiter set wins over them. The **budget is the exception**: it becomes a hard filter, so the first progress step says it back ("budget up to 2,500,000 INR"). A budget without a currency is dropped. If the call fails, the search runs without the facts. The answer is cached for 10 minutes, because a different answer on a repeat would change the shortlist and pay for a new ranking.
+
+### Saved searches: reopening without paying again
+
+User decisions (2026-11-02):
+- every search is saved;
+- each person sees only their own;
+- the newest 50 un-starred searches are kept;
+- starred ones stay;
+- the search on screen stays until Clear or a new search, even after a refresh.
+
+```
+search_by_meaning
+  └─ same transaction as the candidate.search audit row:
+       history.save_search      saved_searches row (query, URL filters, models, counts)
+                                + one saved_search_matches row per card (section, position, fit, criteria, failed filters)
+       repository.prune_history drop this user's un-starred searches beyond the newest 50
+  → result.saved_search_id
+```
+
+- **Reopening a search:** the page then sets `search=<id>` in the URL and remembers that URL in `localStorage` (`candidateSearch.lastSearch`). Opening `?...&search=<id>` calls `GET /semantic-search/history/{id}`. That shows the saved order and the AI's reasons with each candidate's **current** summary, and makes **no AI call**.
+- **The back link and sidebar:** a bare `/admin/candidates` (the profile's back link, the sidebar) redirects to the remembered URL.
+- **Ending the search:** Clear, emptying the box, or pressing Search ends it.
+- **Deleted candidates:** match rows reference `candidates.id` with `ON DELETE CASCADE`, so deleting a candidate removes them, and the AI's notes about them, from every saved search.
+- **Another person's id:** it answers 404 (never 403), so ids leak nothing.
+- **The query text:** this is the only place it is stored. Logs and audit rows still never contain it.
 
 ---
 
@@ -273,8 +316,8 @@ service.match_job
   ├─ STAGE embedding: embeddings.load_job_vector         uses the job's STORED vector: no new AI call
   │      None (not embedded yet, or text changed since) → 409 job_not_ready_for_matching
   ├─ keywords = job title + must-have skills + city
-  ├─ brief    = job.search_document + pay line ("Pay: 60000-90000 EUR per year.")
-  ├─ filters  = job_filters(job)    min years, must-have skills, country; city only if not remote
+  ├─ brief    = job.search_document                     never the pay; code checks the budget
+  ├─ filters  = job_filters(job)    min years, must-have skills, country, budget (salary_max); city only if not remote
   ├─ _find_rank_and_filter(...)     same pipeline as search (section 6)
   └─ record_event("job.match")
 ```
@@ -335,6 +378,10 @@ candidates/service.py  search_candidates
 **Keyset pagination:** instead of `OFFSET 50`, the next page asks for rows *after* the last row seen: `WHERE (created_at, id) < (:last_created_at, :last_id)`. It stays fast on big tables and doesn't skip or repeat rows when new ones are added. The cursor is just that position as base64 JSON.
 
 The hard filters here use the same SQL (`hard_filter_clauses`) as the search-by-meaning prefilter, so both screens agree on who passes.
+
+### Bookmarking a candidate
+
+The star on a row, card or profile calls `PUT /api/v1/admin/candidates/{id}/bookmark` (or `DELETE` to remove it). There is one list for the whole team: `candidate_bookmarks` has one row per candidate, so a second star by someone else changes nothing and the first adder stays. The Bookmarks page reads `GET /api/v1/admin/candidates/bookmarks`. No AI is involved, and starring never re-runs a search.
 
 ---
 

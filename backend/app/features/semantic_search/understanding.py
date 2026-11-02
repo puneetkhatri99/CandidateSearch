@@ -1,7 +1,8 @@
-"""Read the place and years a search states, so those people are fetched first.
+"""Read the place, years and budget a search states.
 
-What comes back only changes who reaches the ranking. It never removes anyone from the results;
-that stays the job of the filters a recruiter sets.
+The place and years only change who reaches the ranking (those people are fetched first); they
+never remove anyone. The budget is different: the service applies it as a hard filter (user
+decision 2026-11-02), and the progress panel says it back so the recruiter can see it.
 """
 
 import asyncio
@@ -20,7 +21,7 @@ from app.features.semantic_search.schemas import HardFilters
 
 logger = structlog.get_logger(__name__)
 
-PROMPT_VERSION = "understand_v2"
+PROMPT_VERSION = "understand_v3"
 INSTRUCTIONS = (Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md").read_text("utf-8")
 OPERATION = "search_understand"
 # Includes the model's reasoning tokens, so more than these few fields alone would need.
@@ -34,6 +35,8 @@ class QueryFacts(BaseModel):
     city: str | None
     country_code: str | None
     min_years: float | None
+    max_salary: int | None
+    salary_currency: str | None
 
 
 # A different answer to a repeated search would change the pool and so pay for a new ranking.
@@ -76,8 +79,14 @@ async def understand_query(session: AsyncSession, query: str) -> HardFilters | N
             tokens_of=lambda r: (r.input_tokens, r.output_tokens),
         )
         facts = result.parsed
+        # Half a budget can't be applied; drop it rather than lose the city and years too.
+        whole_budget = facts.max_salary is not None and facts.salary_currency is not None
         understood = HardFilters(
-            city=facts.city, country=facts.country_code, min_years=facts.min_years
+            city=facts.city,
+            country=facts.country_code,
+            min_years=facts.min_years,
+            max_salary=facts.max_salary if whole_budget else None,
+            salary_currency=facts.salary_currency if whole_budget else None,
         )
     except (
         LLMError,

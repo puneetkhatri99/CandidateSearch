@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { Stamp } from '@/shared/ui'
 import { formatSalary, formatYears } from '@/shared/format'
 import type { CandidateSummary } from '../types'
+import { BookmarkButton } from './BookmarkButton'
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 
@@ -93,7 +94,8 @@ export function CandidateTable({ candidates, onDelete }: CandidateTableProps) {
           </td>
           <td className={`${cell} num whitespace-nowrap text-data text-fg-muted`}>{dateFormat.format(new Date(c.created_at))}</td>
           <td className={`${cell} whitespace-nowrap`}>
-            <div className="flex gap-4">
+            <div className="flex items-center gap-4">
+              <BookmarkButton candidate={c} />
               <Link
                 to={`/admin/candidates/${c.id}?edit=1`}
                 className="rounded-xs font-medium text-accent-fg underline-offset-4 hover:underline"

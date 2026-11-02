@@ -397,6 +397,7 @@ describe('CandidateSearchPage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
+        if (url.endsWith('/bookmarks')) return new Response('{"items":[]}', { status: 200 })
         if (!url.includes('/semantic-search/')) return new Response('{}', { status: 200 })
         const answer = answers.shift() ?? ''
         const finished = new Promise<void>((resolve) => finishes.push(resolve))
@@ -443,5 +444,100 @@ describe('CandidateSearchPage', () => {
     renderPage()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('An unexpected error occurred.')
+  })
+})
+
+// User decision 2026-11-02: the search on screen stays (back link, refresh, new tab) until Clear
+// or a new search, and reopening it is free.
+describe('CandidateSearchPage: the search stays until Clear or a new search', () => {
+  const streamPath = '/api/v1/semantic-search/candidates/stream'
+  const savedPath = '/api/v1/semantic-search/history/s-1'
+  const pathsCalled = (fetchMock: ReturnType<typeof stubApi>) =>
+    fetchMock.mock.calls.map(([input]) => new URL(input, 'http://localhost').pathname)
+  const resultBody = (overrides: Record<string, unknown> = {}) => ({
+    ranked_by: 'ai',
+    embedding_model: 'text-embedding-3-small',
+    ranking_model: 'gpt-5.4-mini',
+    prompt_version: 'rank_v7',
+    items: [{ candidate: candidateSummary(), fit: 'strong', criteria: [], failed_filters: [] }],
+    filtered_out: [],
+    checked: 100,
+    saved_search_id: 's-1',
+    ...overrides,
+  })
+  const savedBody = (starred = false) => ({
+    query: 'python developer',
+    filters: { country: 'IN' },
+    starred,
+    created_at: '2026-11-02T10:00:00Z',
+    result: resultBody(),
+  })
+
+  it('reopens a saved search from the URL without running it again', async () => {
+    const fetchMock = stubApi(route('GET', savedPath, { body: savedBody() }))
+    renderPage('/admin/candidates?q=python+developer&country=IN&search=s-1')
+
+    expect(await screen.findByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
+    expect(pathsCalled(fetchMock)).not.toContain(streamPath)
+    expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('python developer')
+    expect(window.localStorage.getItem('candidateSearch.lastSearch')).toBe('?q=python+developer&country=IN&search=s-1')
+  })
+
+  it('points a finished search at its saved copy, so nothing is paid for twice', async () => {
+    const fetchMock = stubApi(route('GET', streamPath, { stream: sseBody(['result', resultBody()]) }))
+    renderPage('/admin/candidates?q=python+developer')
+
+    expect(await screen.findByRole('button', { name: /Star this search/ })).toBeInTheDocument()
+    expect(window.localStorage.getItem('candidateSearch.lastSearch')).toBe('?q=python+developer&search=s-1')
+    // The saved copy came from the finished search itself: one search, and no reload of it.
+    expect(pathsCalled(fetchMock).filter((p) => p === streamPath)).toHaveLength(1)
+    expect(pathsCalled(fetchMock)).not.toContain(savedPath)
+  })
+
+  it('reopens the last search when the page is opened bare (back link, sidebar, new tab)', async () => {
+    window.localStorage.setItem('candidateSearch.lastSearch', '?q=python+developer&country=IN&search=s-1')
+    const fetchMock = stubApi(route('GET', savedPath, { body: savedBody() }))
+    renderPage('/admin/candidates')
+
+    expect(await screen.findByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('python developer')
+    expect(pathsCalled(fetchMock)).not.toContain(streamPath)
+  })
+
+  it('forgets the search on Clear', async () => {
+    stubApi(
+      route('GET', savedPath, { body: savedBody() }),
+      route('GET', '/api/v1/admin/candidates', { body: { items: [], next_cursor: null } }),
+    )
+    const user = renderPage('/admin/candidates?q=python+developer&search=s-1')
+    await screen.findByRole('link', { name: 'Asha Verma' })
+
+    await user.click(screen.getByRole('button', { name: 'Clear all' }))
+
+    await screen.findByText('No candidates match your search.')
+    expect(window.localStorage.getItem('candidateSearch.lastSearch')).toBeNull()
+  })
+
+  it('stars the search on screen', async () => {
+    const fetchMock = stubApi(
+      route('GET', savedPath, { body: savedBody() }),
+      route('PUT', `${savedPath}/star`, { status: 204 }),
+    )
+    const user = renderPage('/admin/candidates?q=python+developer&search=s-1')
+
+    await user.click(await screen.findByRole('button', { name: /Star this search/ }))
+
+    const star = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/star'))
+    expect(JSON.parse(String(star?.[1]?.body))).toEqual({ starred: true })
+  })
+
+  it('says so when the saved search is gone', async () => {
+    stubApi(route('GET', savedPath, { status: 404, body: { error: { code: 'saved_search_not_found', message: 'Gone', details: {} } } }))
+    renderPage('/admin/candidates?q=python+developer&search=s-1')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This saved search is no longer available. Press Search to run it again.',
+    )
+    expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('python developer')
   })
 })

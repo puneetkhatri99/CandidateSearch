@@ -34,7 +34,7 @@ export function JobMatches({ jobId, jobContentKey, ready }: JobMatchesProps) {
       </div>
       <p className="text-sm text-fg-muted">
         {ready
-          ? 'Ranked by AI against this job: skills and location first, then skill strength, pay and experience. Perfect matches meet the job’s minimum years, must-have skills and location.'
+          ? 'Ranked by AI against this job: skills first, with location unless the job is remote, then experience. Perfect matches meet the job’s minimum years, must-have skills, location and budget (the top of its pay range).'
           : 'Available once this job’s embedding is ready.'}
       </p>
       {requested && matches.isFetching && <SearchProgress stages={matches.stages} label="Matching progress" />}

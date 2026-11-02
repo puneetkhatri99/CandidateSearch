@@ -38,6 +38,7 @@ export function RootLayout() {
   const links = [
     { to: '/admin/candidates', label: 'Candidates', active: pathname.startsWith('/admin/candidates') && !onCreate },
     { to: '/admin/candidates/new', label: 'Add candidate', active: onCreate },
+    { to: '/admin/bookmarks', label: 'Bookmarks', active: pathname.startsWith('/admin/bookmarks') },
     { to: '/jobs', label: 'Jobs', active: pathname.startsWith('/jobs') && !onCreateJob },
     { to: '/jobs/new', label: 'Add job', active: onCreateJob },
     { to: '/admin/ai-usage', label: 'AI spending', active: pathname.startsWith('/admin/ai-usage') },

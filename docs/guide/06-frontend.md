@@ -68,13 +68,15 @@ Import rules (same idea as the backend):
 | `/apply`, `/privacy`, `/login`, `/` | Public pages | none |
 | `/account/password` | Change password | signed in |
 | `/admin/candidates`, `/admin/candidates/new`, `/admin/candidates/:id` | Candidates | signed in |
+| `/admin/bookmarks` | Bookmarks: the team's starred candidates, with who added each | signed in |
 | `/jobs`, `/jobs/new`, `/jobs/:id` | Jobs | signed in |
 | `/admin/ai-usage` | AI spend | signed in |
 | `/admin/users` | Staff accounts | admin |
 | `/admin/system` | System | signed in |
-| `/settings` | Settings: links to Change password, Users (admins only) and System | signed in |
+| `/settings` | Settings: links to Saved searches, Change password, Users (admins only) and System | signed in |
+| `/settings/searches` | Saved searches: your own past searches, starred first, with Open / Star / Delete | signed in |
 
-The sidebar lists Candidates, Add candidate, Jobs, Add job, AI spending and Settings. Settings stays highlighted on the pages it opens. The bottom of the sidebar holds only the signed-in name, role and Sign out; Change password moved to Settings (`app/SettingsPage.tsx`).
+The sidebar lists Candidates, Add candidate, Bookmarks, Jobs, Add job, AI spending and Settings. Settings stays highlighted on the pages it opens. The bottom of the sidebar holds only the signed-in name, role and Sign out; Change password moved to Settings (`app/SettingsPage.tsx`).
 
 `RequireAuth` (in `features/auth`) asks `GET /auth/me`. No user → redirect to `/login?next=...`. User must change password → redirect to `/account/password`. `RequireRole` checks the role. These guards are for a good experience only; **the API enforces the real rules**.
 
@@ -103,13 +105,16 @@ Example: `features/candidate-admin/hooks.ts`.
 
 | Hook | What it does |
 |---|---|
-| `useSearchFilters()` | Keeps the search text and filters **in the URL** (`?q=...&city=...`), so a search survives refresh and can be shared as a link. |
+| `useSearchFilters()` | Keeps the search text and filters **in the URL** (`?q=...&city=...`), so a search survives refresh and can be shared as a link. Also `savedId` (the `search=` param) and `startSearch(q)`, which sets the text and drops `search=` in one URL update. |
+| `useSavedSearch(id)`, `useRememberSavedSearch()` | A saved search reopened (`staleTime: Infinity`, free). A finished search is put straight into that cache, so pointing the URL at it makes no request. |
+| `useSearchHistory()`, `useStarSearch()`, `useDeleteSavedSearch()` | The Saved searches page. Keys sit under `['saved-searches']`, which is free to refetch, so candidate deletes invalidate it. |
 | `useCandidateSearch(filters)` | The browse list (no search text). `useInfiniteQuery` with cursor paging ("Load more"). |
 | `useMeaningSearch(filters)` | Search by meaning. Calls `searchByMeaning` (SSE) and collects the stage events in `stages` for the progress panel. `staleTime` 5 minutes and no refetch on focus, because each run is a paid AI call. |
 | `useJobMatches(jobId, jobContentKey, { enabled })` | Job matching. Runs only after the user clicks **Find candidates** (`enabled`). The key includes the job's matching fields, so editing those fields never reuses old results, and never starts a paid run by itself. |
 | `useRunLog()` | A tiny state holder: `begin()` clears the stages and returns the stream callback that fills them. |
 | `useCandidate(id)` | One profile. |
 | `useCreateStaffCandidate`, `useUpdateCandidate`, `useDeleteCandidate` | Mutations. On success they update the cached detail and invalidate cached search lists. |
+| `useBookmarks()`, `useToggleBookmark()` | The shared bookmark list (key `['candidates', 'bookmarks']`, outside the search keys, so a star never starts an AI search) and the star toggle. The toggle is optimistic: the star flips at once and flips back if the call fails. `BookmarkButton` (☆/★, `aria-pressed`) sits on the browse table, every `MatchCard` and the profile header. |
 
 Query keys are built in one `keys` object per file. Job matches deliberately sit under a different key prefix than searches, so invalidating searches can't trigger a paid ranking.
 
@@ -123,6 +128,12 @@ Query keys are built in one `keys` object per file. Job matches deliberately sit
 - When results arrive, the page header says how much work went in: "Checked 100 profiles, best 25 shown", or with filters "Checked 100 profiles, 18 meet every filter". The job page says "Checked N profiles, M meet every requirement".
 - `MatchResults` shows two lists of `MatchCard`s: **perfect matches** (pass every filter) and **filtered out** (with "Fails filter: City", etc.). Each card leads with the verdict and the AI's reason for each criterion. Email, source and date added are on the profile and in the browse table, not on the cards.
 - The list appears only once the AI has finished, with at most 25 perfect matches and 10 filtered out. Until then only `SearchProgress` shows, and results from the previous search are hidden too.
+- **The search stays until Clear or a new search.**
+  - A finished search adds `search=<saved id>` to the URL; with it, the page shows the saved copy instead of searching (free).
+  - `lastSearch.ts` keeps that URL in `localStorage`, so a bare `/admin/candidates` (the profile's back link, the sidebar, a new tab) redirects to it before the page mounts, with the box filled in.
+  - Clear, emptying the box, or pressing Search forgets it.
+  - The "Star this search" button keeps it past the 50-search limit.
+  - A gone id says "This saved search is no longer available. Press Search to run it again."
 
 The job detail page uses the same pieces through `JobMatches`.
 
@@ -142,6 +153,7 @@ The last two come from `GET /api/v1/admin/system` through `useSystemDetails`, al
 - The backend is still the source of truth. Server-side 422 errors are mapped back onto the form fields (`serverErrors.ts`).
 - Edits send the `version` that was loaded; a 409 `version_conflict` shows "changed by someone else, reload".
 - Rules that must match the backend live in `shared/forms/` (tags, salary, currencies). When you change a rule, change `backend/app/shared/validation.py` too.
+- **Resumes.** `ResumeUpload` (in `candidate-profile`, used by the public form and Add candidate) sends the file to `POST /api/v1/resumes` and calls `fillFromResume`, which fills **only empty fields** and returns their labels. The upload has three visible states: a drop zone (click or drag a file), `ReadingResume` (spinner, file name and a live seconds counter that warns after 30 s; also used by `ResumeBar`), and a summary of how many fields were filled, with one chip per field and what to do next. After Add candidate, the new profile page shows "Candidate added" (and whether a resume is attached) from router state. Both form schemas carry a `resume_ref` field ('' → null) so the resume is linked when the profile is saved. On the profile page, `ResumeBar` shows **See resume** (a plain link opening the PDF in a new tab, so no blob handling is needed) and **Upload / Replace resume** (`useAttachResume`).
 
 ## Styling rules
 

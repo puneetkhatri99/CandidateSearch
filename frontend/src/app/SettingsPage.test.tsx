@@ -24,6 +24,7 @@ describe('SettingsPage', () => {
     // Back to Settings after saving the new password.
     expect(screen.getByRole('link', { name: 'Change password' })).toHaveAttribute('href', '/account/password?next=%2Fsettings')
     expect(screen.getByRole('link', { name: 'System' })).toHaveAttribute('href', '/admin/system')
+    expect(screen.getByRole('link', { name: 'Saved searches' })).toHaveAttribute('href', '/settings/searches')
   })
 
   it('leaves Users out for a recruiter', async () => {

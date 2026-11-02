@@ -13,7 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.core.errors import ForbiddenError, NotFoundError
 from app.core.pagination import decode_created_at_cursor, next_created_at_cursor
 from app.features.audit import AuditAction, record_event
-from app.features.auth import AuthContext
+from app.features.auth import AuthContext, get_full_names
 from app.features.candidates import repository
 from app.features.candidates.exceptions import CandidateAlreadyExistsError, VersionConflictError
 from app.features.candidates.models import (
@@ -23,6 +23,8 @@ from app.features.candidates.models import (
     CandidateExperience,
 )
 from app.features.candidates.schemas import (
+    Bookmark,
+    BookmarkList,
     CandidateCreate,
     CandidateCreated,
     CandidateDetail,
@@ -129,7 +131,7 @@ def _apply_profile(candidate: Candidate, profile: CandidateProfile) -> list[str]
 
 
 def _new_candidate(
-    profile: CandidateProfile,
+    profile: CandidateCreate | StaffCandidateCreate,
     *,
     consent_version: str,
     source: str,
@@ -142,6 +144,7 @@ def _new_candidate(
         consent_given_at=datetime.now(UTC),
         consent_version=consent_version,
         consent_recorded_by=consent_recorded_by,
+        resume_ref=profile.resume_ref,
     )
     _apply_profile(candidate, profile)
     return candidate
@@ -215,6 +218,7 @@ def to_detail(candidate: Candidate) -> CandidateDetail:
         source=candidate.source,
         consent_given_at=candidate.consent_given_at,
         consent_version=candidate.consent_version,
+        has_resume=candidate.resume_ref is not None,
         created_at=candidate.created_at,
         updated_at=candidate.updated_at,
     )
@@ -377,6 +381,85 @@ async def delete_candidate(
     logger.info("candidate_deleted", candidate_id=str(candidate_id))
 
 
+# --- Resumes (the files live in ResumeAI; features/resumes calls it) -------------------------
+
+
+async def get_resume_ref(
+    session: AsyncSession, candidate_id: uuid.UUID, actor: AuthContext, *, viewing: bool
+) -> uuid.UUID | None:
+    """The candidate's ResumeAI reference (None when no resume is attached). 404 for an unknown
+    candidate. With `viewing`, records that the actor opened the resume."""
+    async with session.begin():
+        candidate = await repository.get_candidate_row(session, candidate_id)
+        if candidate is None:
+            raise NotFoundError("Candidate not found.")
+        if viewing and candidate.resume_ref is not None:
+            _audit(session, actor, "candidate.resume_view", candidate_id)
+        return candidate.resume_ref
+
+
+async def attach_resume(
+    session: AsyncSession, candidate_id: uuid.UUID, resume_ref: uuid.UUID, actor: AuthContext
+) -> None:
+    """Link a resume ResumeAI has stored to the candidate. Profile fields stay as they are."""
+    async with session.begin():
+        if not await repository.set_resume_ref(session, candidate_id, resume_ref):
+            raise NotFoundError("Candidate not found.")
+        _audit(session, actor, "candidate.resume_attach", candidate_id)
+
+
+# --- Bookmarks (one list shared by the team) ------------------------------------------------
+
+
+async def bookmark_candidate(
+    session: AsyncSession, candidate_id: uuid.UUID, actor: AuthContext
+) -> None:
+    try:
+        async with session.begin():
+            if await repository.add_bookmark(session, candidate_id, actor.user_id):
+                _audit(session, actor, "candidate.bookmark", candidate_id)
+    except IntegrityError as exc:
+        # The conflict on candidate_id is ignored, so only the foreign key can fail: the
+        # candidate doesn't exist (or was deleted meanwhile).
+        raise NotFoundError("Candidate not found.") from exc
+
+
+async def unbookmark_candidate(
+    session: AsyncSession, candidate_id: uuid.UUID, actor: AuthContext
+) -> None:
+    async with session.begin():
+        if await repository.remove_bookmark(session, candidate_id):
+            _audit(session, actor, "candidate.unbookmark", candidate_id)
+
+
+async def list_bookmarks(session: AsyncSession, actor: AuthContext) -> BookmarkList:
+    # shortcut: unpaged, fine for a few hundred bookmarks; page it with the created_at cursor
+    # helpers when lists grow.
+    async with session.begin():
+        rows = await repository.list_bookmarks(session)
+        names = await get_full_names(session, list({bookmark.added_by for bookmark, _ in rows}))
+        # Lists names and emails, so it is audited like a search.
+        record_event(
+            session,
+            action="candidate.search",
+            entity_type="candidate",
+            entity_id=None,
+            actor_user_id=actor.user_id,
+            ip=actor.ip,
+            details={"filters": ["bookmarked"], "result_count": len(rows)},
+        )
+    return BookmarkList(
+        items=[
+            Bookmark(
+                candidate=_to_summary(candidate),
+                added_by_name=names.get(bookmark.added_by, "Unknown user"),
+                added_at=bookmark.created_at,
+            )
+            for bookmark, candidate in rows
+        ]
+    )
+
+
 # --- For features that rank candidates (semantic search) -----------------------------------
 
 
@@ -460,9 +543,17 @@ def candidate_ids_passing(
     city: str | None,
     country: str | None,
     source: str | None,
+    max_salary: int | None = None,
+    salary_currency: str | None = None,
 ) -> Select[uuid.UUID]:
     """A subquery of the candidates meeting every hard filter; other features pass it to their
     own queries (embeddings' nearest search, the full-text search) to search only among them."""
     return repository.ids_passing(
-        min_years=min_years, skills=skills, city=city, country=country, source=source
+        min_years=min_years,
+        skills=skills,
+        city=city,
+        country=country,
+        source=source,
+        max_salary=max_salary,
+        salary_currency=salary_currency,
     )

@@ -1,6 +1,12 @@
 from fastapi import status
 
-from app.core.errors import AppError
+from app.core.errors import AppError, NotFoundError
+
+
+class SavedSearchNotFoundError(NotFoundError):
+    """Missing, pruned, deleted, or another person's: all look the same, so ids leak nothing."""
+
+    code = "saved_search_not_found"
 
 
 class QueryLooksPersonalError(AppError):

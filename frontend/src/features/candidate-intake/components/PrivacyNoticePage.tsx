@@ -18,6 +18,11 @@ export function PrivacyNoticePage() {
         Your expected salary is optional. If you give it, it is compared with a role&apos;s pay range when ranking
         candidates, which means it is sent, without your name or contact details, to our AI provider (OpenAI).
       </p>
+      <p className="max-w-prose">
+        Uploading a resume is optional. If you upload one, it is sent to ResumeAI, our resume service, which uses AI
+        to read your details so we can fill in the form for you, and keeps that data to produce a formatted copy of
+        your resume for our recruiters. The file itself is not kept, by us or by ResumeAI.
+      </p>
       <p className="max-w-prose">You can ask us at any time to see, correct or delete your data.</p>
     </article>
   )
