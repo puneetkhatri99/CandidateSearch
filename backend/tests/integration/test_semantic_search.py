@@ -72,6 +72,7 @@ class ChatMock:
     understanding_payloads: list[dict[str, Any]] = field(default_factory=list)
     understanding_statuses: list[int] = field(default_factory=list)
     understanding_delay_seconds: float = 0.0
+    ranking_delay_seconds: float = 0.0
 
     @staticmethod
     def profiles(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -89,6 +90,7 @@ class ChatMock:
             return httpx2.Response(statuses.pop(0), json=body)
         answer: dict[str, Any]
         if ranking_call:
+            await asyncio.sleep(self.ranking_delay_seconds)
             judgements = [self.judge(p) for p in self.profiles(payload)]
             answer = {
                 "search_names_place": any(j["location"] != "not_required" for j in judgements),
@@ -231,7 +233,7 @@ async def test_the_llm_judgements_decide_the_order(
     assert (body["ranked_by"], body["ranking_model"], body["prompt_version"]) == (
         "ai",
         "gpt-5.4-mini",
-        "rank_v5",
+        "rank_v6",
     )
     first = body["items"][0]
     assert first["candidate"]["id"] == str(ids[2])
@@ -295,7 +297,7 @@ async def test_ranking_is_metered_with_output_tokens_and_audited(
         "filters": ["q"],
         "limit": 25,
         "understood": [],
-        "understanding_prompt_version": "understand_v1",
+        "understanding_prompt_version": "understand_v2",
         "result_count": 2,
         "filtered_out_count": 0,
         "ranked_by": "ai",
@@ -483,6 +485,25 @@ async def test_a_repeated_search_reuses_the_ranking(
     assert first.json()["items"] == second.json()["items"]
     assert len(chat_mock.payloads) == 1
     assert len(chat_mock.understanding_payloads) == 1
+
+
+async def test_identical_searches_at_the_same_time_pay_for_one_ranking(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    # A page that drops a search and sends it again (React StrictMode, a second tab) once paid
+    # for every copy, because the server finishes a search even after the page leaves.
+    await _seed_embedded(2)
+    chat_mock.ranking_delay_seconds = 0.5  # so the copies overlap
+
+    responses = await asyncio.gather(
+        *(admin_client.get(f"{URL}/stream", params={"q": QUERY}) for _ in range(3))
+    )
+
+    results = [_sse(r.text)[-1] for r in responses]
+    assert [(name, data["ranked_by"]) for name, data in results] == [("result", "ai")] * 3
+    assert len({json.dumps(data["items"]) for _, data in results}) == 1
+    assert len(chat_mock.payloads) == 1
+    assert [e.status for e in await _events("search_rank")] == ["succeeded"]
 
 
 async def test_an_edited_profile_is_ranked_again(

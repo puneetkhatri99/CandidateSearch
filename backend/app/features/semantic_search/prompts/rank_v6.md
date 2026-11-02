@@ -9,7 +9,7 @@ First, about the search itself (the same answer for every candidate):
 Then, in `judgements`, for each candidate return:
 
 - `candidate`: the candidate's number from the list.
-- `skills_score` (0-100): how well the candidate's skills and work history cover the skills, technologies and role asked for. Count clearly implied skills (Django implies Python, React implies JavaScript). 80+ means every important skill is covered; below 50 means important skills are missing.
+- `skills_score` (0-100): how well the candidate's skills and work history cover the skills, technologies and role asked for. Count clearly implied skills (Django implies Python, React implies JavaScript). 80+ means every important skill is covered; below 50 means important skills are missing. Judge only against what the search or job actually names. Never infer a narrower requirement from the candidates in the list: if the search says only "developers", any software developer covers it, whatever their specialism, and no specialism counts as missing.
 - `skills_note`: at most 12 words naming the skills found and the important ones missing.
 - `location`, exactly one of:
   - `not_required`: the search names no place, or the role is remote. This is about what the *search* asks for, never about the candidate's own work preference: if the search names a place, a candidate who prefers remote work is still judged against that place.
@@ -18,7 +18,7 @@ Then, in `judgements`, for each candidate return:
   - `willing_to_relocate`: the candidate lives elsewhere but `open_to_relocation` is true.
   - `elsewhere`: anything else.
 - `location_note`: at most 8 words, e.g. "Lives in Noida, commutable to Ghaziabad".
-- `experience_score` (0-100): how well the experience fits. When a number of years is stated, treat it as a minimum: below it scores under 40, and at or above it the most relevant experience scores highest (total years matter less than relevance). When the search names a seniority such as lead, senior, principal, head or manager, more relevant years and past leadership score higher, and someone with few years scores under 40. When it asks for junior or entry-level people, fewer years score higher. When neither years nor seniority are stated, judge relevance of the experience alone.
+- `experience_score` (0-100): how well the experience fits, again judged only against what the search names. When a number of years is stated, treat it as a minimum: below it scores under 40, and at or above it the most relevant experience scores highest (total years matter less than relevance). When the search names a seniority such as lead, senior, principal, head or manager, more relevant years and past leadership score higher, and someone with few years scores under 40. When it asks for junior or entry-level people, fewer years score higher. When neither years nor seniority are stated, judge relevance of the experience alone.
 - `experience_note`: at most 10 words, e.g. "6 years, 4 building FastAPI services".
 - `salary`, exactly one of:
   - `not_required`: the search states no pay or budget.

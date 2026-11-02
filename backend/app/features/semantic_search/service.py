@@ -121,45 +121,77 @@ async def _rank_with_llm(
     answer = ranking.cached_answer(key)
     if answer is not None:
         await progress.done("ranking", "Same search as earlier, ready instantly")
-    else:
-        counter = JudgementCounter()
-
-        async def report(text: str) -> None:
-            # Every PROGRESS_STEP profiles and at the last one, not an event per token.
-            before, now = counter.count, counter.update(text)
-            if now // PROGRESS_STEP > before // PROGRESS_STEP or now >= len(pool) > before:
-                done = min(now, len(pool))
-                await progress.count(
-                    "ranking", done, len(pool), f"Read {done} of {_profiles(len(pool))}"
-                )
-
-        try:
-            client = get_llm_client()
-            result = await ai_usage.metered_call(
-                session,
-                provider=client.provider_name,
-                model=ranking.RANK_MODEL,
-                operation=RANK_OPERATION,
-                trigger="api",
-                item_count=len(pool),
-                call=lambda: client.parse(
-                    model=ranking.RANK_MODEL,
-                    instructions=ranking.INSTRUCTIONS,
-                    content=content,
-                    schema=ranking.RankingAnswer,
-                    max_output_tokens=ranking.MAX_OUTPUT_TOKENS,
-                    on_text=report if progress.listening else None,
-                ),
-                tokens_of=lambda r: (r.input_tokens, r.output_tokens),
-            )
-        except (LLMError, ai_usage.BudgetExceededError, ai_usage.UnknownModelPriceError) as exc:
-            logger.warning("semantic_search_ranking_unavailable", error_type=type(exc).__name__)
-            await progress.done("ranking", "AI ranking unavailable, kept the search order")
-            return None
-        answer = result.parsed
-        ranking.remember_answer(key, answer)
-        await progress.done("ranking", "Every profile judged")
+        return ranking.rank_by_judgements(answer, pool, required)
+    running = _rankings_running.get(key)
+    try:
+        if running is not None:
+            # The same search is already being judged (a second tab, a double click): wait for
+            # it instead of paying again. Shielded, so this caller leaving can't cancel it.
+            answer = await asyncio.shield(running)
+        else:
+            answer = await _judge_once(session, key, content, pool, progress)
+    except (LLMError, ai_usage.BudgetExceededError, ai_usage.UnknownModelPriceError) as exc:
+        logger.warning("semantic_search_ranking_unavailable", error_type=type(exc).__name__)
+        await progress.done("ranking", "AI ranking unavailable, kept the search order")
+        return None
+    await progress.done("ranking", "Every profile judged")
     return ranking.rank_by_judgements(answer, pool, required)
+
+
+# Rankings being judged right now, by cache key, so identical searches share one paid call.
+_rankings_running: dict[ranking.CacheKey, asyncio.Future[ranking.RankingAnswer]] = {}
+
+
+async def _judge_once(
+    session: AsyncSession,
+    key: ranking.CacheKey,
+    content: str,
+    pool: list[candidates.RankableCandidate],
+    progress: Progress,
+) -> ranking.RankingAnswer:
+    """The one paid ranking call for `key`; searches arriving meanwhile wait on its future."""
+    future: asyncio.Future[ranking.RankingAnswer] = asyncio.get_running_loop().create_future()
+    # Marks a failure as seen even when nobody else was waiting for it.
+    future.add_done_callback(lambda done: done.cancelled() or done.exception())
+    _rankings_running[key] = future
+    counter = JudgementCounter()
+
+    async def report(text: str) -> None:
+        # Every PROGRESS_STEP profiles and at the last one, not an event per token.
+        before, now = counter.count, counter.update(text)
+        if now // PROGRESS_STEP > before // PROGRESS_STEP or now >= len(pool) > before:
+            done = min(now, len(pool))
+            await progress.count(
+                "ranking", done, len(pool), f"Read {done} of {_profiles(len(pool))}"
+            )
+
+    try:
+        client = get_llm_client()
+        result = await ai_usage.metered_call(
+            session,
+            provider=client.provider_name,
+            model=ranking.RANK_MODEL,
+            operation=RANK_OPERATION,
+            trigger="api",
+            item_count=len(pool),
+            call=lambda: client.parse(
+                model=ranking.RANK_MODEL,
+                instructions=ranking.INSTRUCTIONS,
+                content=content,
+                schema=ranking.RankingAnswer,
+                max_output_tokens=ranking.MAX_OUTPUT_TOKENS,
+                on_text=report if progress.listening else None,
+            ),
+            tokens_of=lambda r: (r.input_tokens, r.output_tokens),
+        )
+    except BaseException as exc:
+        future.set_exception(exc if isinstance(exc, Exception) else LLMError("ranking abandoned"))
+        raise
+    finally:
+        _rankings_running.pop(key, None)
+    ranking.remember_answer(key, result.parsed)
+    future.set_result(result.parsed)
+    return result.parsed
 
 
 def _profiles(count: int) -> str:

@@ -341,7 +341,7 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 
 | Name | What it does |
 |---|---|
-| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/understand_v1.md`, loaded once. |
+| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/understand_v2.md`, loaded once. |
 | `QueryFacts` | The JSON the LLM must return: `city`, `country_code`, `min_years`, each null unless the text states it. |
 | `understand_query(session, query)` | One metered `gpt-5.4-mini` call with a 10 s timeout, about $0.0004. The answer is checked through `HardFilters`, then cached for 10 minutes. Any failure logs the class name and returns `None`, and the search carries on. |
 | `clear_understanding_cache()` | Empties the cache (tests). |
@@ -350,7 +350,7 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 
 | Name | What it does |
 |---|---|
-| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v5.md`, loaded once. A prompt change gets a new file name. |
+| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v6.md`, loaded once. A prompt change gets a new file name. |
 | `RANK_MODEL` | `gpt-5.4-mini`. |
 | `required_work_mode(query)` | Finds "hybrid", "office/onsite/wfo" or "remote/wfh" in the search text. Hybrid wins if several appear. |
 | `fits_work_mode(candidate_modes, required)` | Office (2) ≥ hybrid (1) ≥ remote (0): a candidate fits if they accept at least as much office time as the role needs. |

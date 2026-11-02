@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app.features import candidates
 from app.features.semantic_search.schemas import Criterion, Fit, SemanticMatch
 
-PROMPT_VERSION = "rank_v5"
+PROMPT_VERSION = "rank_v6"
 INSTRUCTIONS = (Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md").read_text("utf-8")
 RANK_MODEL = "gpt-5.4-mini"
 # Room for up to 110 judgements (about 150 tokens each); caps a runaway answer at about $0.09
@@ -260,16 +260,16 @@ def rank_by_judgements(
 
 # --- Cache: repeating a search over unchanged profiles is free ---------------------------------
 
-type _CacheKey = tuple[str, str, tuple[tuple[uuid.UUID, str], ...]]
-_cache: OrderedDict[_CacheKey, tuple[float, RankingAnswer]] = OrderedDict()
+type CacheKey = tuple[str, str, tuple[tuple[uuid.UUID, str], ...]]
+_cache: OrderedDict[CacheKey, tuple[float, RankingAnswer]] = OrderedDict()
 
 
-def cache_key(model: str, query: str, pool: Sequence[candidates.RankableCandidate]) -> _CacheKey:
+def cache_key(model: str, query: str, pool: Sequence[candidates.RankableCandidate]) -> CacheKey:
     profiles = tuple((c.summary.id, c.updated_at.isoformat()) for c in pool)
     return (f"{model}:{PROMPT_VERSION}", query.casefold(), profiles)
 
 
-def cached_answer(key: _CacheKey) -> RankingAnswer | None:
+def cached_answer(key: CacheKey) -> RankingAnswer | None:
     entry = _cache.get(key)
     if entry is None or time.monotonic() - entry[0] > RANKING_CACHE_SECONDS:
         _cache.pop(key, None)
@@ -278,7 +278,7 @@ def cached_answer(key: _CacheKey) -> RankingAnswer | None:
     return entry[1]
 
 
-def remember_answer(key: _CacheKey, answer: RankingAnswer) -> None:
+def remember_answer(key: CacheKey, answer: RankingAnswer) -> None:
     _cache[key] = (time.monotonic(), answer)
     if len(_cache) > RANKING_CACHE_SIZE:
         _cache.popitem(last=False)

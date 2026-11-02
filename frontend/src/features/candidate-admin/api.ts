@@ -28,19 +28,16 @@ interface RunListeners {
 }
 
 /** Hybrid search, ranked by AI, then split by the hard filters; streams each step. */
-export function searchByMeaning(filters: SearchFilters, signal: AbortSignal, listeners: RunListeners) {
+export function searchByMeaning(filters: SearchFilters, listeners: RunListeners) {
   const params = filterParams(filters, SEARCH_RESULT_LIMIT)
-  return streamRequest<SemanticSearchResult, StageEvent>(`/api/v1/semantic-search/candidates/stream?${params}`, {
-    signal,
-    ...listeners,
-  })
+  return streamRequest<SemanticSearchResult, StageEvent>(`/api/v1/semantic-search/candidates/stream?${params}`, listeners)
 }
 
 /** Candidates for a job, ranked by AI against it and split by its requirements; streams each step. */
-export function matchCandidatesToJob(jobId: string, signal: AbortSignal, listeners: RunListeners) {
+export function matchCandidatesToJob(jobId: string, listeners: RunListeners) {
   return streamRequest<SemanticSearchResult, StageEvent>(
     `/api/v1/semantic-search/jobs/${encodeURIComponent(jobId)}/candidates/stream`,
-    { signal, ...listeners },
+    listeners,
   )
 }
 

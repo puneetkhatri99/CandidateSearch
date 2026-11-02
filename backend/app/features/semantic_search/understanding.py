@@ -20,7 +20,7 @@ from app.features.semantic_search.schemas import HardFilters
 
 logger = structlog.get_logger(__name__)
 
-PROMPT_VERSION = "understand_v1"
+PROMPT_VERSION = "understand_v2"
 INSTRUCTIONS = (Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md").read_text("utf-8")
 OPERATION = "search_understand"
 # Includes the model's reasoning tokens, so more than these few fields alone would need.

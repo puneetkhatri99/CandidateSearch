@@ -31,7 +31,7 @@ Each feature uses the same file names. Not every feature needs every file.
 | `service.py` | **Business logic.** Opens transactions, applies rules, calls the repository, writes audit events. | The interesting code |
 | `repository.py` | **All SQL** for this feature. | Queries only, no rules |
 | `exceptions.py` | Errors this feature raises, each with an HTTP status and code. | `AppError` subclasses |
-| `prompts/` | LLM prompt files, versioned by name (`rank_v5.md`). | Text |
+| `prompts/` | LLM prompt files, versioned by name (`rank_v6.md`). | Text |
 | `tests/` | Unit tests for this feature. | Tests |
 
 ### The three layers

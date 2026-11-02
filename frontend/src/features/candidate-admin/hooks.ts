@@ -78,7 +78,9 @@ export function useMeaningSearch(filters: SearchFilters, { enabled = true } = {}
   const { stages, begin } = useRunLog()
   const query = useQuery({
     queryKey: keys.meaning(filters),
-    queryFn: ({ signal }) => searchByMeaning(filters, signal, begin()),
+    // No abort signal: the server finishes (and pays for) a search even when the page drops it,
+    // so cancelling on unmount (React StrictMode, navigating back) only paid for it twice.
+    queryFn: () => searchByMeaning(filters, begin()),
     retry: false,
     // Each new query is a paid OpenAI call; don't refetch on focus or remount.
     staleTime: 5 * 60_000,
@@ -92,7 +94,7 @@ export function useJobMatches(jobId: string, jobContentKey: string, { enabled = 
   const { stages, begin } = useRunLog()
   const query = useQuery({
     queryKey: keys.jobMatches(jobId, jobContentKey),
-    queryFn: ({ signal }) => matchCandidatesToJob(jobId, signal, begin()),
+    queryFn: () => matchCandidatesToJob(jobId, begin()), // no abort signal, as above
     retry: false,
     staleTime: 5 * 60_000,
     enabled,

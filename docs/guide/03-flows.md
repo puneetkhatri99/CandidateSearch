@@ -211,6 +211,7 @@ semantic_search/service.py  search_by_meaning
   │    ├─ STAGE augmentation:  ranking.build_prompt(q, pool)      anonymised JSON, no names
   │    ├─ STAGE ranking:       _rank_with_llm
   │    │      ├─ same query + same profiles in the last 10 min? reuse the cached answer (free)
+  │    │      ├─ the same ranking already running (second tab, page re-sent it)? wait for it, don't pay again
   │    │      ├─ metered_call(client.parse(... schema=RankingAnswer))     gpt-5.4-mini
   │    │      ├─ any failure (no key, budget, timeout) → None → keep the hybrid order, ranked_by="search"
   │    │      └─ ranking.rank_by_judgements(answer, pool, required_work_mode)

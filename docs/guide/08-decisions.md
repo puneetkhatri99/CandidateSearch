@@ -109,7 +109,7 @@ See [02-architecture.md](02-architecture.md). Everything about one capability is
 
 ### "Does the search name a place / state pay?" is asked once per search
 **Why:** inferring it from any one candidate's verdict let one odd answer change the scoring for all 20.
-**Where:** `RankingAnswer.search_names_place`, `search_states_pay`, `search_wants_junior`; prompt `rank_v5.md`.
+**Where:** `RankingAnswer.search_names_place`, `search_states_pay`, `search_wants_junior`; prompt `rank_v6.md`.
 
 ### 100 profiles go to the LLM
 **Decision (user):** the shortlist is 100 (plus up to 10 filtered-out when filters are set), and the best 25 are shown. No place names are hardcoded: a typed place reaches the shortlist because each profile's embedded text states its location, and because `understanding.py` reads it from the search text.
