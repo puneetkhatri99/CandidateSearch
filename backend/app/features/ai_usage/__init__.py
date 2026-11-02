@@ -3,12 +3,15 @@
 from app.core.ai_pricing import UnknownModelPriceError
 from app.features.ai_usage.exceptions import BudgetExceededError
 from app.features.ai_usage.router import router
-from app.features.ai_usage.service import budget_used_up, has_budget, metered_call
+from app.features.ai_usage.schemas import BudgetSummary
+from app.features.ai_usage.service import budget_used_up, get_summary, has_budget, metered_call
 
 __all__ = [
     "BudgetExceededError",
+    "BudgetSummary",
     "UnknownModelPriceError",
     "budget_used_up",
+    "get_summary",
     "has_budget",
     "metered_call",
     "router",

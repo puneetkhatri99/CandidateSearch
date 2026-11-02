@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -8,7 +9,8 @@ from typing import Any
 import httpx2
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
+from sqlalchemy.exc import DBAPIError
 
 from app.core.db import get_sessionmaker
 from app.core.embeddings import get_embedding_provider
@@ -21,11 +23,14 @@ from app.features.candidates import (
     create_candidate,
     full_text_candidate_ids,
     get_rankable_candidates,
+    rebuild_search_documents,
 )
+from app.features.candidates import repository as candidates_repository
 from app.features.candidates.models import Candidate
 from app.features.candidates.tests.factories import valid_candidate_payload
 from app.features.embeddings import CANDIDATES, JOBS, embed_stale
-from app.features.semantic_search import ranking, service
+from app.features.embeddings.repository import nearest_neighbours
+from app.features.semantic_search import ranking, service, understanding
 from app.features.semantic_search.schemas import HardFilters
 from app.shared.validation import split_tags
 from tests.integration.conftest import FETCH_HEADERS, create_job
@@ -33,6 +38,7 @@ from tests.openai_mock import OpenAIEmbeddingsMock
 
 URL = "/api/v1/semantic-search/candidates"
 QUERY = "senior backend engineer payments"
+NO_BUDGET = {"max_salary": None, "salary_currency": None}
 
 type Judge = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -46,20 +52,32 @@ def _judge_everyone_the_same(profile: dict[str, Any]) -> dict[str, Any]:
         "location_note": "No place named",
         "experience_score": 70,
         "experience_note": "6 years backend",
-        "salary": "not_required",
-        "salary_note": "No pay stated",
     }
 
 
 @dataclass
 class ChatMock:
-    """Answers /v1/chat/completions like the ranking model would, from `judge`."""
+    """Answers /v1/chat/completions like the models would: rankings from `judge`, and the facts
+    of a search from `facts`. `payloads` and `statuses` are about the ranking calls only."""
 
     judge: Judge = _judge_everyone_the_same
     payloads: list[dict[str, Any]] = field(default_factory=list)
     statuses: list[int] = field(default_factory=list)
     # Set to answer with a refusal instead of judgements (still billed by OpenAI).
     refusal: str | None = None
+    facts: dict[str, Any] = field(
+        default_factory=lambda: {
+            "city": None,
+            "country_code": None,
+            "min_years": None,
+            "max_salary": None,
+            "salary_currency": None,
+        }
+    )
+    understanding_payloads: list[dict[str, Any]] = field(default_factory=list)
+    understanding_statuses: list[int] = field(default_factory=list)
+    understanding_delay_seconds: float = 0.0
+    ranking_delay_seconds: float = 0.0
 
     @staticmethod
     def profiles(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -69,16 +87,29 @@ class ChatMock:
 
     async def handler(self, request: httpx2.Request) -> httpx2.Response:
         payload = json.loads(request.content)
-        self.payloads.append(payload)
-        if self.statuses:
+        ranking_call = "Candidates:\n" in payload["messages"][1]["content"]
+        (self.payloads if ranking_call else self.understanding_payloads).append(payload)
+        statuses = self.statuses if ranking_call else self.understanding_statuses
+        if statuses:
             body = {"error": {"message": "mocked failure", "type": "mock_error", "code": None}}
-            return httpx2.Response(self.statuses.pop(0), json=body)
-        judgements = [self.judge(p) for p in self.profiles(payload)]
-        answer = {
-            "search_names_place": any(j["location"] != "not_required" for j in judgements),
-            "search_states_pay": any(j["salary"] != "not_required" for j in judgements),
-            "judgements": judgements,
-        }
+            return httpx2.Response(statuses.pop(0), json=body)
+        answer: dict[str, Any]
+        if ranking_call:
+            await asyncio.sleep(self.ranking_delay_seconds)
+            judgements = [self.judge(p) for p in self.profiles(payload)]
+            answer = {
+                "search_names_place": any(j["location"] != "not_required" for j in judgements),
+                "search_wants_junior": False,
+                "judgements": judgements,
+            }
+        else:
+            await asyncio.sleep(self.understanding_delay_seconds)
+            answer = self.facts
+        refusal = self.refusal if ranking_call else None
+        if payload.get("stream"):
+            return self._streamed(
+                payload["model"], None if refusal else json.dumps(answer), refusal
+            )
         return httpx2.Response(
             200,
             json={
@@ -92,8 +123,8 @@ class ChatMock:
                         "finish_reason": "stop",
                         "message": {
                             "role": "assistant",
-                            "content": None if self.refusal else json.dumps(answer),
-                            "refusal": self.refusal,
+                            "content": None if refusal else json.dumps(answer),
+                            "refusal": refusal,
                         },
                     }
                 ],
@@ -101,12 +132,34 @@ class ChatMock:
             },
         )
 
+    @staticmethod
+    def _streamed(model: str, content: str | None, refusal: str | None) -> httpx2.Response:
+        """The same answer as server-sent chunks, in small pieces, then the usage chunk."""
+
+        def chunk(delta: dict[str, Any], finish: str | None = None) -> dict[str, Any]:
+            choice = {"index": 0, "delta": delta, "finish_reason": finish}
+            return {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 0,
+                    "model": model, "choices": [choice]}  # fmt: skip
+
+        text = content if content is not None else refusal or ""
+        field_name = "content" if content is not None else "refusal"
+        chunks = [chunk({"role": "assistant", field_name: ""})]
+        chunks += [chunk({field_name: text[i : i + 40]}) for i in range(0, len(text), 40)]
+        chunks.append(chunk({}, "stop"))
+        usage = {"prompt_tokens": 1200, "completion_tokens": 300, "total_tokens": 1500}
+        chunks.append({"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 0,
+                       "model": model, "choices": [], "usage": usage})  # fmt: skip
+        body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+        return httpx2.Response(200, text=body, headers={"content-type": "text/event-stream"})
+
 
 @pytest.fixture(autouse=True)
 def empty_cache() -> Iterator[None]:
     ranking.clear_ranking_cache()
+    understanding.clear_understanding_cache()
     yield
     ranking.clear_ranking_cache()
+    understanding.clear_understanding_cache()
 
 
 @pytest.fixture(autouse=True)
@@ -184,7 +237,7 @@ async def test_the_llm_judgements_decide_the_order(
     assert (body["ranked_by"], body["ranking_model"], body["prompt_version"]) == (
         "ai",
         "gpt-5.4-mini",
-        "rank_v3",
+        "rank_v7",
     )
     first = body["items"][0]
     assert first["candidate"]["id"] == str(ids[2])
@@ -246,12 +299,174 @@ async def test_ranking_is_metered_with_output_tokens_and_audited(
     assert audit.details == {
         "mode": "semantic",
         "filters": ["q"],
-        "limit": 20,
+        "limit": 25,
+        "understood": [],
+        "understanding_prompt_version": "understand_v3",
         "result_count": 2,
         "filtered_out_count": 0,
         "ranked_by": "ai",
     }
     assert "payments" not in json.dumps(audit.details)
+
+
+async def test_the_ai_judges_the_whole_shortlist_but_only_the_top_25_are_returned(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    ids = await _seed_embedded(30)
+
+    def judge(profile: dict[str, Any]) -> dict[str, Any]:
+        number = int(profile["profile"].split("Specialist number ")[1].split(".")[0].split()[0])
+        return {**_judge_everyone_the_same(profile), "skills_score": 90 if number < 25 else 10}
+
+    chat_mock.judge = judge
+
+    body = (await admin_client.get(URL, params={"q": QUERY})).json()
+
+    [payload] = chat_mock.payloads
+    assert len(ChatMock.profiles(payload)) == 30
+    # Set by what the AI judged, not by the order the search fetched them in.
+    assert {m["candidate"]["id"] for m in body["items"]} == {str(cid) for cid in ids[:25]}
+
+
+async def test_a_place_in_the_search_text_brings_in_people_from_outside_the_shortlist(
+    admin_client: AsyncClient, chat_mock: ChatMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service, "POOL_SIZE", 20)  # so 25 profiles overflow it
+    ids = await _seed_embedded(25)
+    unfiltered = (await admin_client.get(URL, params={"q": QUERY})).json()
+    shown = {m["candidate"]["id"] for m in unfiltered["items"]}
+    hidden = next(cid for cid in ids if str(cid) not in shown)
+    async with get_sessionmaker()() as session, session.begin():
+        await session.execute(update(Candidate).values(city="Chennai"))
+        (await session.get_one(Candidate, hidden)).city = "New Delhi"
+    understanding.clear_understanding_cache()
+    chat_mock.facts = {"city": "delhi", "country_code": None, "min_years": None, **NO_BUDGET}
+
+    body = (await admin_client.get(URL, params={"q": QUERY})).json()
+
+    # Fetched first, and nobody else is removed: the text isn't a filter.
+    assert ChatMock.profiles(chat_mock.payloads[-1])[0]["city"] == "New Delhi"
+    assert str(hidden) in {m["candidate"]["id"] for m in body["items"]}
+    assert len(body["items"]) == 20
+    assert body["filtered_out"] == []
+    assert all(m["failed_filters"] == [] for m in body["items"])
+    audit = (await _search_audits())[-1]
+    assert audit.details["understood"] == ["city"]
+    assert "delhi" not in json.dumps(audit.details).lower()
+
+
+async def test_a_filter_the_recruiter_set_wins_over_the_search_text(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    ids = await _seed_embedded(3)
+    async with get_sessionmaker()() as session, session.begin():
+        await session.execute(update(Candidate).values(city="Chennai"))
+        (await session.get_one(Candidate, ids[0])).city = "Delhi"
+    chat_mock.facts = {"city": "delhi", "country_code": None, "min_years": None, **NO_BUDGET}
+
+    body = (await admin_client.get(URL, params={"q": QUERY, "city": "chennai"})).json()
+
+    assert {m["candidate"]["id"] for m in body["items"]} == {str(ids[1]), str(ids[2])}
+    assert [m["failed_filters"] for m in body["filtered_out"]] == [["city"]]
+    assert [p["city"] for p in ChatMock.profiles(chat_mock.payloads[0])][:2] == ["Chennai"] * 2
+
+
+async def _set_expected_salary(candidate_id: uuid.UUID, amount: int, currency: str) -> None:
+    async with get_sessionmaker()() as session, session.begin():
+        candidate = await session.get_one(Candidate, candidate_id)
+        candidate.expected_salary, candidate.salary_currency = amount, currency
+
+
+async def test_a_budget_in_the_search_text_filters_out_people_who_expect_more(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    # User decision 2026-11-02: over budget goes to "Filtered out"; no stated salary and a
+    # salary in another currency stay in.
+    within, over, unstated, dollars = await _seed_embedded(4)
+    await _set_expected_salary(within, 1_800_000, "INR")
+    await _set_expected_salary(over, 3_000_000, "INR")
+    await _set_expected_salary(dollars, 90_000, "USD")
+    chat_mock.facts = {
+        "city": None,
+        "country_code": None,
+        "min_years": None,
+        "max_salary": 2_500_000,
+        "salary_currency": "INR",
+    }
+
+    response = await admin_client.get(f"{URL}/stream", params={"q": f"{QUERY} under 25 LPA"})
+
+    events = _sse(response.text)
+    [body] = [data for name, data in events if name == "result"]
+    assert {m["candidate"]["id"] for m in body["items"]} == {
+        str(within),
+        str(unstated),
+        str(dollars),
+    }
+    assert [(m["candidate"]["id"], m["failed_filters"]) for m in body["filtered_out"]] == [
+        (str(over), ["max_salary"])
+    ]
+    details = {d["stage"]: d["detail"] for n, d in events if n == "stage" and d["state"] == "done"}
+    assert details["embedding"] == "budget up to 2,500,000 INR"
+    # Pay is checked by code; the ranking prompt never carries it.
+    assert "salary" not in chat_mock.payloads[0]["messages"][1]["content"]
+    audit = (await _search_audits())[-1]
+    assert audit.details["understood"] == ["max_salary"]
+    assert "2500000" not in json.dumps(audit.details)
+
+
+async def test_half_a_budget_from_the_search_text_is_not_applied(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    [over] = await _seed_embedded(1)
+    await _set_expected_salary(over, 3_000_000, "INR")
+    chat_mock.facts = {
+        "city": None,
+        "country_code": None,
+        "min_years": None,
+        "max_salary": 2_500_000,
+        "salary_currency": None,
+    }
+
+    body = (await admin_client.get(URL, params={"q": QUERY})).json()
+
+    assert [m["candidate"]["id"] for m in body["items"]] == [str(over)]
+    assert body["filtered_out"] == []
+
+
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [("provider", "failed"), ("timeout", "failed"), ("invalid", "succeeded")],
+)
+async def test_a_search_still_works_when_its_text_cannot_be_understood(
+    admin_client: AsyncClient,
+    chat_mock: ChatMock,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    status: str,
+) -> None:
+    await _seed_embedded(2)
+    if failure == "provider":
+        chat_mock.understanding_statuses.append(500)
+    elif failure == "timeout":
+        monkeypatch.setattr(understanding, "TIMEOUT_SECONDS", 0.01)
+        chat_mock.understanding_delay_seconds = 1.0
+    else:
+        chat_mock.facts = {
+            "city": "delhi",
+            "country_code": "NOT-A-COUNTRY",
+            "min_years": 999,
+            **NO_BUDGET,
+        }
+
+    response = await admin_client.get(URL, params={"q": QUERY})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["ranked_by"], len(body["items"])) == ("ai", 2)
+    assert [e.status for e in await _events("search_understand")] == [status]
+    [audit] = await _search_audits()
+    assert audit.details["understood"] == []
 
 
 async def test_hard_filters_split_the_ranked_list_and_keep_its_order(
@@ -292,9 +507,10 @@ async def test_hard_filters_split_the_ranked_list_and_keep_its_order(
     }
 
 
-async def test_a_filter_finds_a_perfect_match_outside_the_unfiltered_top_20(
-    admin_client: AsyncClient,
+async def test_a_filter_finds_a_perfect_match_outside_the_unfiltered_shortlist(
+    admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(service, "POOL_SIZE", 20)  # so 25 profiles overflow it
     ids = await _seed_embedded(25)
     unfiltered = (await admin_client.get(URL, params={"q": QUERY})).json()
     shown = {m["candidate"]["id"] for m in unfiltered["items"]}
@@ -340,6 +556,26 @@ async def test_a_repeated_search_reuses_the_ranking(
     assert first.status_code == second.status_code == 200
     assert first.json()["items"] == second.json()["items"]
     assert len(chat_mock.payloads) == 1
+    assert len(chat_mock.understanding_payloads) == 1
+
+
+async def test_identical_searches_at_the_same_time_pay_for_one_ranking(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    # A page that drops a search and sends it again (React StrictMode, a second tab) once paid
+    # for every copy, because the server finishes a search even after the page leaves.
+    await _seed_embedded(2)
+    chat_mock.ranking_delay_seconds = 0.5  # so the copies overlap
+
+    responses = await asyncio.gather(
+        *(admin_client.get(f"{URL}/stream", params={"q": QUERY}) for _ in range(3))
+    )
+
+    results = [_sse(r.text)[-1] for r in responses]
+    assert [(name, data["ranked_by"]) for name, data in results] == [("result", "ai")] * 3
+    assert len({json.dumps(data["items"]) for _, data in results}) == 1
+    assert len(chat_mock.payloads) == 1
+    assert [e.status for e in await _events("search_rank")] == ["succeeded"]
 
 
 async def test_an_edited_profile_is_ranked_again(
@@ -364,7 +600,8 @@ async def test_when_the_llm_fails_results_keep_the_search_order(
         fits.city = "Ghaziabad"
     chat_mock.statuses.append(500)
 
-    response = await admin_client.get(URL, params={"q": "fastapi developer in ghaziabad"})
+    # Only the city is a keyword, so only that profile is in both halves of the fetch.
+    response = await admin_client.get(URL, params={"q": "ghaziabad"})
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -421,7 +658,9 @@ async def test_a_spent_budget_after_the_embedding_still_returns_results(
     assert response.status_code == 200, response.text
     assert response.json()["ranked_by"] == "search"
     assert chat_mock.payloads == []
+    assert chat_mock.understanding_payloads == []
     assert [e.status for e in await _events("search_query")] == ["succeeded"]
+    assert [e.status for e in await _events("search_understand")] == ["blocked"]
     assert [e.status for e in await _events("search_rank")] == ["blocked"]
 
 
@@ -503,7 +742,7 @@ async def test_recruiters_can_search_and_anonymous_users_cannot(
         {"q": "a"},
         {"q": "x" * 501},
         {"q": QUERY, "limit": 0},
-        {"q": QUERY, "limit": 21},
+        {"q": QUERY, "limit": 26},
         {},
         {"q": QUERY, "min_years": -1},
         {"q": QUERY, "country": "ZZ"},
@@ -539,10 +778,12 @@ def _job_url(job_id: str) -> str:
 async def test_a_job_is_matched_by_its_stored_embedding_and_split_by_its_requirements(
     admin_client: AsyncClient, chat_mock: ChatMock, openai_mock: OpenAIEmbeddingsMock
 ) -> None:
-    ids = await _seed_embedded(3)  # Bengaluru, IN, 6.5 years, python/fastapi/postgresql
+    ids = await _seed_embedded(4)  # Bengaluru, IN, 6.5 years, python/fastapi/postgresql
     async with get_sessionmaker()() as session, session.begin():
         (await session.get_one(Candidate, ids[1])).city = "Pune"
         (await session.get_one(Candidate, ids[2])).years_experience = Decimal(2)
+    await _set_expected_salary(ids[0], 2_400_000, "INR")  # at the top of the range still fits
+    await _set_expected_salary(ids[3], 2_400_001, "INR")
     job_id = await _embedded_job(
         admin_client,
         work_mode="onsite",
@@ -565,15 +806,21 @@ async def test_a_job_is_matched_by_its_stored_embedding_and_split_by_its_require
     assert {m["candidate"]["id"]: m["failed_filters"] for m in body["filtered_out"]} == {
         str(ids[1]): ["city"],
         str(ids[2]): ["min_years"],
+        str(ids[3]): ["max_salary"],  # the top of the pay range is the budget
     }
-    # The LLM sees the job brief and its pay, never the job owner's name.
+    salary = next(c for c in body["items"][0]["criteria"] if c["name"] == "salary")
+    assert (salary["status"], salary["note"]) == (
+        "met",
+        "Expects 2,400,000 INR, budget 2,400,000 INR",
+    )
+    # The LLM sees the job brief, never its pay (checked by code) or the job owner's name.
     [payload] = chat_mock.payloads
     prompt = payload["messages"][1]["content"]
-    assert "Pay: 1500000-2400000 INR per year." in prompt
+    assert "2400000" not in prompt
     assert "Must-have skills: python" in prompt
     [audit] = [a for a in await _all_audits() if a.action == "job.match"]
     assert audit.entity_id == uuid.UUID(job_id)
-    assert audit.details == {"result_count": 1, "filtered_out_count": 2, "ranked_by": "ai"}
+    assert audit.details == {"result_count": 1, "filtered_out_count": 3, "ranked_by": "ai"}
 
 
 async def test_a_remote_job_does_not_filter_by_city(admin_client: AsyncClient) -> None:
@@ -625,20 +872,58 @@ async def test_a_streamed_search_reports_each_stage_then_the_result(
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _sse(response.text)
     stages = [(data["stage"], data["state"]) for name, data in events if name == "stage"]
-    assert stages == [
+    assert [step for step in stages if step[1] != "progress"] == [
         (stage, state)
         for stage in ("embedding", "retrieval", "augmentation", "ranking", "filtering")
         for state in ("started", "done")
     ]
+    # The AI's answer is streamed and counted: one count at the last profile, inside ranking.
+    counts = [d for n, d in events if n == "stage" and d["state"] == "progress"]
+    assert [(c["stage"], c["completed"], c["total"], c["detail"]) for c in counts] == [
+        ("ranking", 2, 2, "Read 2 of 2 profiles")
+    ]
+    assert stages.index(("ranking", "progress")) == stages.index(("ranking", "started")) + 1
     details = {d["stage"]: d["detail"] for n, d in events if n == "stage" and d["state"] == "done"}
     assert details["retrieval"] == "Found 2 profiles, 2 meeting every filter"
-    assert details["ranking"] == "Ranked by gpt-5.4-mini"
+    assert details["ranking"] == "Every profile judged"
     assert all(d["elapsed_ms"] >= 0 for n, d in events if n == "stage" and d["state"] == "done")
     name, result = events[-1]
     assert name == "result"
-    assert len(result["items"]) == 2
+    assert (len(result["items"]), result["checked"], result["ranked_by"]) == (2, 2, "ai")
+    [event] = await _events("search_rank")
+    # Streaming still records the tokens, so the call is priced like a plain one.
+    assert (event.input_tokens, event.output_tokens) == (1200, 300)
     # The query text is never echoed in the progress.
-    assert "payments" not in response.text.split("event: result")[0]
+    assert "payments" not in json.dumps([d for n, d in events if n == "stage"])
+
+
+async def test_a_streamed_search_says_back_the_place_and_years_it_read(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    await _seed_embedded(1)
+    chat_mock.facts = {"city": "new delhi", "country_code": "IN", "min_years": 5, **NO_BUDGET}
+
+    events = _sse((await admin_client.get(f"{URL}/stream", params={"q": QUERY})).text)
+
+    [understood] = [
+        d for n, d in events if n == "stage" and d["stage"] == "embedding" and d["state"] == "done"
+    ]
+    assert understood["detail"] == "Looking first in New Delhi, India, 5+ years"
+
+
+async def test_a_streamed_search_sends_profiles_only_in_the_final_result(
+    admin_client: AsyncClient,
+) -> None:
+    await _seed_embedded(2)
+
+    response = await admin_client.get(f"{URL}/stream", params={"q": QUERY, "city": "Nowhere"})
+
+    events = _sse(response.text)
+    assert {name for name, _ in events[:-1]} == {"stage"}
+    assert "Semantic Person" not in json.dumps([data for _, data in events[:-1]])
+    name, result = events[-1]
+    assert name == "result"
+    assert all(m["fit"] is not None for m in result["filtered_out"])
 
 
 async def test_a_streamed_job_match_reports_errors_in_the_stream(
@@ -665,13 +950,73 @@ async def test_a_streamed_job_match_says_it_reused_the_saved_embedding(
     [embedding_done] = [
         d for n, d in events if n == "stage" and d["stage"] == "embedding" and d["state"] == "done"
     ]
-    assert embedding_done["detail"] == "Used the job's saved embedding, no new AI call"
+    assert embedding_done["detail"] == "Job understood from its saved profile, no new AI call"
     assert events[-1][0] == "result"
 
 
 async def test_streams_need_a_signed_in_user(client: AsyncClient) -> None:
     response = await client.get(f"{URL}/stream", params={"q": QUERY}, headers=FETCH_HEADERS)
     assert response.status_code == 401
+
+
+async def test_the_shortlist_is_not_cut_at_the_old_size_of_20(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    await _seed_embedded(25)
+
+    body = (await admin_client.get(URL, params={"q": QUERY})).json()
+
+    assert len(ChatMock.profiles(chat_mock.payloads[0])) == 25
+    assert len(body["items"]) == 25
+
+
+async def test_a_large_nearest_search_widens_the_index_scan() -> None:
+    # The HNSW index returns at most ef_search rows (40 by default), whatever the LIMIT says.
+    async with get_sessionmaker()() as session, session.begin():
+        await nearest_neighbours(session, [0.0] * 1536, "text-embedding-3-small", 100)
+        assert await session.scalar(text("SHOW hnsw.ef_search")) == "100"
+
+
+async def test_rebuilding_documents_updates_old_ones_without_touching_the_profile() -> None:
+    [old_format, _] = await _seed_embedded(2, city="Noida", country_code="IN")
+    async with get_sessionmaker()() as session, session.begin():
+        row = await session.get_one(Candidate, old_format)
+        row.search_document = "Document in an old format."
+    async with get_sessionmaker()() as session:
+        await embed_stale(session, get_embedding_provider(), CANDIDATES)
+    async with get_sessionmaker()() as session, session.begin():
+        before = await session.get_one(Candidate, old_format)
+        version, updated_at = before.version, before.updated_at
+
+    async with get_sessionmaker()() as session:
+        assert await rebuild_search_documents(session) == 1
+    async with get_sessionmaker()() as session:
+        assert await rebuild_search_documents(session) == 0  # nothing left to do
+
+    async with get_sessionmaker()() as session, session.begin():
+        rebuilt = await session.get_one(Candidate, old_format)
+        assert "Location: Noida, India." in rebuilt.search_document
+        assert (rebuilt.version, rebuilt.updated_at) == (version, updated_at)
+    # Only the changed one is embedded again.
+    async with get_sessionmaker()() as session:
+        outcome = await embed_stale(session, get_embedding_provider(), CANDIDATES)
+    assert outcome.embedded == 1
+
+
+async def test_rebuilding_documents_locks_the_profiles_it_reads() -> None:
+    """An edit saved while the rebuild runs must wait, not be overwritten by old text."""
+    [candidate_id] = await _seed_embedded(1)
+    async with get_sessionmaker()() as reader, reader.begin():
+        await candidates_repository.list_candidates_with_children(reader)
+        async with get_sessionmaker()() as writer:
+            await writer.execute(text("SET lock_timeout = '200ms'"))
+            with pytest.raises(DBAPIError, match="lock timeout"):
+                await writer.execute(
+                    update(Candidate)
+                    .where(Candidate.id == candidate_id)
+                    .values(headline="Edited meanwhile")
+                )
+            await writer.rollback()
 
 
 async def _all_audits() -> list[AuditEvent]:
@@ -708,6 +1053,50 @@ async def test_sql_and_python_filters_agree_on_spellings(
 
     assert passing_sql is passes
     assert (service.failed_filters(rankable, filters) == []) is passes
+
+
+@pytest.mark.parametrize(
+    ("salary", "passes"),
+    [
+        (None, True),  # no stated salary counts as within budget (user decision)
+        ((2_000_000, "INR"), True),  # exactly the budget
+        ((2_000_001, "INR"), False),
+        ((90_000, "USD"), True),  # another currency can't be compared, so it isn't filtered
+    ],
+)
+async def test_sql_and_python_filters_agree_on_the_budget(
+    salary: tuple[int, str] | None, passes: bool
+) -> None:
+    [candidate_id] = await _seed_embedded(1)
+    if salary is not None:
+        await _set_expected_salary(candidate_id, *salary)
+    filters = HardFilters(max_salary=2_000_000, salary_currency="INR")
+
+    async with get_sessionmaker()() as session, session.begin():
+        passing_sql = candidate_id in set(
+            await session.scalars(
+                candidate_ids_passing(
+                    min_years=None,
+                    skills=[],
+                    city=None,
+                    country=None,
+                    source=None,
+                    max_salary=2_000_000,
+                    salary_currency="INR",
+                )
+            )
+        )
+    async with get_sessionmaker()() as session:
+        rankable = (await get_rankable_candidates(session, [candidate_id]))[candidate_id]
+
+    assert passing_sql is passes
+    assert (service.failed_filters(rankable, filters) == []) is passes
+
+
+def test_a_budget_needs_its_currency() -> None:
+    with pytest.raises(ValueError, match="currency"):
+        HardFilters(max_salary=2_000_000)
+    assert HardFilters(max_salary="2000000", salary_currency="inr").salary_currency == "INR"
 
 
 def test_looks_personal() -> None:

@@ -30,8 +30,8 @@ from app.core.errors import describe_error
 from app.features import ai_usage
 from app.features.ai_usage import BudgetExceededError
 from app.features.embeddings import repository
-from app.features.embeddings.repository import EmbeddingRow
-from app.features.embeddings.targets import JOBS, TARGETS, EmbeddingTarget
+from app.features.embeddings.repository import EmbeddingCounts, EmbeddingRow
+from app.features.embeddings.targets import JOBS, TARGETS, EmbeddingTarget, TargetName
 
 logger = structlog.get_logger(__name__)
 
@@ -217,6 +217,17 @@ async def load_job_vector(
     """The job's embedding, or None while it is missing or older than the job's text."""
     async with session.begin():
         return await repository.load_current_vector(session, job_id, model, target=JOBS)
+
+
+async def get_embedding_counts(
+    session: AsyncSession, model: str
+) -> dict[TargetName, EmbeddingCounts]:
+    """Up-to-date and failed embeddings for candidates and for jobs: counts only."""
+    async with session.begin():
+        return {
+            target.name: await repository.count_embeddings(session, model, target=target)
+            for target in TARGETS
+        }
 
 
 async def get_job_embedding_status(

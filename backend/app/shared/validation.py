@@ -20,6 +20,11 @@ from pydantic_core import PydanticCustomError
 COUNTRY_CODES = frozenset(country.alpha_2 for country in pycountry.countries)
 
 
+def country_name(country_code: str) -> str:
+    country = pycountry.countries.get(alpha_2=country_code)
+    return country.name if country else country_code
+
+
 def custom_error(code: str, message: str) -> PydanticCustomError:
     # Custom errors keep messages user-readable (no "Value error, ..." prefix).
     return PydanticCustomError(code, message)

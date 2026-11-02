@@ -3,16 +3,23 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.core.db import SessionDep
 from app.features.auth import CurrentUser, require_fetch_header_on_any_method
-from app.features.semantic_search import service
-from app.features.semantic_search.schemas import SemanticSearchParams, SemanticSearchResult
+from app.features.semantic_search import history, service
+from app.features.semantic_search.schemas import (
+    SavedSearchDetail,
+    SavedSearchPage,
+    SemanticSearchParams,
+    SemanticSearchResult,
+    StarRequest,
+)
 from app.features.semantic_search.streaming import stream_search
 
-# Every route here is a paid AI call, so even GETs need the CSRF header.
+# Most routes here are paid AI calls, so even GETs need the CSRF header (the saved-search
+# routes are free, and need it only for being on this router).
 router = APIRouter(
     prefix="/semantic-search",
     tags=["semantic search"],
@@ -53,3 +60,35 @@ async def match_candidates_to_job(
 ) -> SemanticSearchResult:
     """A paid AI ranking (about $0.02), so the UI calls it only on request."""
     return await service.match_job(session, job_id, actor)
+
+
+@router.get("/history")
+async def list_saved_searches(
+    session: SessionDep,
+    actor: CurrentUser,
+    cursor: Annotated[str | None, Query(max_length=500)] = None,
+) -> SavedSearchPage:
+    """Your own past searches, newest first. Free: nothing is re-run."""
+    return await history.list_history(session, actor, cursor)
+
+
+@router.get("/history/{saved_search_id}")
+async def get_saved_search(
+    saved_search_id: uuid.UUID, session: SessionDep, actor: CurrentUser
+) -> SavedSearchDetail:
+    """One of your searches with its result as it was ranked. Free: no AI call."""
+    return await history.get_saved_search(session, actor, saved_search_id)
+
+
+@router.put("/history/{saved_search_id}/star", status_code=status.HTTP_204_NO_CONTENT)
+async def star_saved_search(
+    saved_search_id: uuid.UUID, body: StarRequest, session: SessionDep, actor: CurrentUser
+) -> None:
+    await history.star_saved_search(session, actor, saved_search_id, body.starred)
+
+
+@router.delete("/history/{saved_search_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_saved_search(
+    saved_search_id: uuid.UUID, session: SessionDep, actor: CurrentUser
+) -> None:
+    await history.delete_saved_search(session, actor, saved_search_id)

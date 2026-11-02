@@ -14,7 +14,7 @@ from app.core.errors import UnhandledErrorMiddleware, register_exception_handler
 from app.core.logging import configure_logging
 from app.core.maintenance import start_background_maintenance, stop_background_maintenance
 from app.core.middleware import RequestContextMiddleware
-from app.features import ai_usage, auth, candidates, health, jobs, semantic_search
+from app.features import ai_usage, auth, candidates, health, jobs, resumes, semantic_search
 from app.maintenance import maintenance_tasks
 
 
@@ -25,6 +25,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Before the engine goes: the runner finishes its in-flight task using the database.
     await stop_background_maintenance()
     await close_embedding_provider()
+    await resumes.close_resumeai_client()
     await get_engine().dispose()
 
 
@@ -45,7 +46,12 @@ def create_app() -> FastAPI:
     # inside CORS and request-context (headers, log line); the body limit is next so 413
     # responses also carry CORS headers.
     app.add_middleware(UnhandledErrorMiddleware)
-    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=settings.max_request_body_bytes,
+        upload_paths=resumes.UPLOAD_PATHS,
+        upload_max_bytes=settings.max_resume_bytes,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -67,6 +73,8 @@ def create_app() -> FastAPI:
     api_v1.include_router(candidates.router)
     api_v1.include_router(candidates.admin_router)
     api_v1.include_router(semantic_search.router)
+    api_v1.include_router(health.admin_router)
+    api_v1.include_router(resumes.router)
     app.include_router(api_v1)
 
     return app

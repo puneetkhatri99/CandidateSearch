@@ -1,10 +1,12 @@
 """Embeddings for candidates and job roles: the stale scan that embeds them, and nearest search."""
 
+from app.features.embeddings.repository import EmbeddingCounts
 from app.features.embeddings.service import (
     EmbedOutcome,
     JobEmbeddingStatus,
     embed_all_stale,
     embed_stale,
+    get_embedding_counts,
     get_job_embedding_status,
     load_job_vector,
     nearest_candidates_to_vector,
@@ -16,9 +18,11 @@ __all__ = [
     "JOBS",
     "TARGETS",
     "EmbedOutcome",
+    "EmbeddingCounts",
     "JobEmbeddingStatus",
     "embed_all_stale",
     "embed_stale",
+    "get_embedding_counts",
     "get_job_embedding_status",
     "load_job_vector",
     "nearest_candidates_to_vector",

@@ -10,6 +10,7 @@ from app.core.db import SessionDep
 from app.features.auth import AdminUser, CurrentUser
 from app.features.candidates import service
 from app.features.candidates.schemas import (
+    BookmarkList,
     CandidateDetail,
     CandidatePage,
     CandidateSearchParams,
@@ -25,6 +26,26 @@ async def search_candidates(
     params: Annotated[CandidateSearchParams, Query()], session: SessionDep, actor: CurrentUser
 ) -> CandidatePage:
     return await service.search_candidates(session, params, actor)
+
+
+# Declared before /{candidate_id}, which would otherwise read "bookmarks" as an id.
+@router.get("/bookmarks")
+async def list_bookmarks(session: SessionDep, actor: CurrentUser) -> BookmarkList:
+    return await service.list_bookmarks(session, actor)
+
+
+@router.put("/{candidate_id}/bookmark", status_code=status.HTTP_204_NO_CONTENT)
+async def bookmark_candidate(
+    candidate_id: uuid.UUID, session: SessionDep, actor: CurrentUser
+) -> None:
+    await service.bookmark_candidate(session, candidate_id, actor)
+
+
+@router.delete("/{candidate_id}/bookmark", status_code=status.HTTP_204_NO_CONTENT)
+async def unbookmark_candidate(
+    candidate_id: uuid.UUID, session: SessionDep, actor: CurrentUser
+) -> None:
+    await service.unbookmark_candidate(session, candidate_id, actor)
 
 
 @router.get("/{candidate_id}")

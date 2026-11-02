@@ -57,6 +57,55 @@ describe('CandidateForm', () => {
     expect(JSON.parse(init.body as string)).toMatchObject({ email: 'asha.verma@example.com', phone: '+919876543210' })
   })
 
+  it('fills empty fields from an uploaded resume and links it on submit', async () => {
+    const extracted = {
+      resume_ref: '7f9a3c1e-0000-4000-8000-000000000001',
+      profile: {
+        full_name: 'Priya Raman', email: 'priya@example.com', phone: null, city: 'Pune', country_code: 'IN',
+        linkedin_url: null, github_url: null, portfolio_url: null, headline: 'Backend Engineer',
+        years_experience: 4.5, skills: ['python'],
+        experiences: [{ company: 'Nimbus', title: 'Backend Engineer', start_month: '2021-01', is_current: true, end_month: null, description: null }],
+        educations: [],
+      },
+    }
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      const body = url === '/api/v1/resumes' ? extracted : { id: 'abc', created_at: '2026-10-27T00:00:00Z' }
+      return new Response(JSON.stringify(body), { status: init.method === 'POST' && url !== '/api/v1/resumes' ? 201 : 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    // The name was typed already, so the resume's name must not replace it.
+    const { onSubmitted, user } = renderForm({ ...validFormValues(), full_name: 'Typed Name', city: '', experiences: [] })
+
+    const file = new File(['resume text'], 'cv.pdf', { type: 'application/pdf' })
+    await user.upload(screen.getByLabelText('Your resume'), file)
+
+    expect(await screen.findByText('Filled in 2 fields from the resume')).toBeInTheDocument()
+    const filled = screen.getByRole('list', { name: 'Filled in from the resume' })
+    expect(filled).toHaveTextContent('City')
+    expect(filled).toHaveTextContent('Experience')
+    expect(screen.getByLabelText(/^City/)).toHaveValue('Pune')
+    expect(screen.getByLabelText(/^Full name/)).toHaveValue('Typed Name')
+    expect(screen.getByLabelText(/^Company/)).toHaveValue('Nimbus')
+    const [, uploadInit] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(uploadInit.body).toBe(file)
+    expect(uploadInit.headers).toMatchObject({ 'X-Requested-With': 'fetch', 'Content-Type': 'application/octet-stream' })
+
+    await submit(user)
+
+    await waitFor(() => expect(onSubmitted).toHaveBeenCalled())
+    const [, submitInit] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(JSON.parse(submitInit.body as string)).toMatchObject({ resume_ref: extracted.resume_ref, full_name: 'Typed Name' })
+  })
+
+  it('explains a resume the service could not read', async () => {
+    mockFetch(422, { error: { code: 'resume_unreadable', message: 'The resume is over 4 pages.', details: {} } })
+    const { user } = renderForm()
+
+    await user.upload(screen.getByLabelText('Your resume'), new File(['x'], 'cv.pdf'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The resume is over 4 pages.')
+  })
+
   it('shows the duplicate-email message from the server on the email field', async () => {
     mockFetch(409, {
       error: { code: 'candidate_exists', message: 'A profile with this email already exists.', details: {} },

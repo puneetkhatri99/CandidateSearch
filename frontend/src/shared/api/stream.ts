@@ -1,6 +1,6 @@
 /**
- * Reads a server-sent-events response: `stage` events go to `onStage` as they arrive, then
- * the `result` event resolves the promise and an `error` event rejects it with an ApiError.
+ * Reads a server-sent-events response: `stage` events go to their callback as they arrive,
+ * then the `result` event resolves the promise and an `error` event rejects it with an ApiError.
  * fetch is used instead of EventSource so the request carries the CSRF header and an abort
  * signal like every other API call.
  */

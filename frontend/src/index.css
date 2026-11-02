@@ -32,6 +32,14 @@
   --radius-md: 10px;
   --default-transition-duration: 120ms;
 
+  --animate-reveal: reveal 300ms ease-out;
+
+  @keyframes reveal {
+    from {
+      opacity: 0;
+    }
+  }
+
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
   --color-surface-muted: #f4f4f5;

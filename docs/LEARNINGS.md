@@ -603,3 +603,130 @@ A running log of things learned about this project: decisions, gotchas, provider
   - The list endpoint lost `q`, `work_mode`, `max_years` and `sort`, and `candidates.lookup_text` and its trigram index are dropped (migration `d2b7e4a1c9f6`, applied to the dev DB; its downgrade rebuilds the column). This settles the open question in "One search box": staff have no name or email lookup. The `pg_trgm` extension stays installed, now unused.
   - The list now uses the shared `decode_created_at_cursor` / `next_created_at_cursor`. Their 2000-3000 year check fixed the two strict xfails for extreme timestamps; the three name and experience cursor xfails went with those sorts. A cursor timestamp with a trailing NUL still gives 200, which is harmless (see "Phase 3 build gotchas").
 - **Impact / action:** A new paid GET route belongs on the `semantic_search` router, or needs the same dependency. `test_sql_and_python_filters_agree_on_spellings` guards the two filter implementations.
+
+### 2026-10-30: Search results show up before the AI ranks them (~~superseded~~ 2026-11-02: the list now appears only after the AI finishes; see "Top 25, and what fixed the Delhi search")
+- **Context:** Making search feel better: result cards, recruiter wording, and a visible ranking.
+- **Learning:**
+  - The stream now sends a `preview` event after retrieval, with the same shape as `result` (`ranked_by: "search"`, no verdicts). It reuses the same split, so filtered-out people are already separated.
+  - A preview contains names and emails, so it counts as personal data like the result. Stage events still carry only counts.
+  - The reorder is a hand-written FLIP (measure, then animate with `element.animate`), not the View Transitions API. View Transitions freeze the page in a snapshot during the move, which would block the filter inputs. WAAPI ignores the CSS reduced-motion rule, so `useGlide` checks `matchMedia` itself.
+  - Positions are measured in page coordinates, so the progress panel closing above the list is part of the same glide rather than a jump.
+- **Impact / action:** `preview` in the hooks is non-null only while the run is fetching, so a finished, cached or failed search never shows stale previews. A new stage's wording goes in `SearchProgress`.
+
+### 2026-10-30: One session lookup costs 6 database round trips
+- **Context:** Checking whether database-backed sessions get slow when Postgres is on another server.
+- **Learning:** One `get_live_session` call in its own `session.begin()`, with `pool_pre_ping=True`, makes 6 client-to-server sends, counted through a local TCP proxy on a warm connection. It takes about 1-2 ms on localhost, but the time grows with network delay: about 650 ms with about 100 ms added per trip. Each later `session.begin()` in a request probably pays a similar overhead, because the connection goes back to the pool in between (not measured).
+- **Impact / action:** Run the API and Postgres in the same region or data centre. If the overhead ever shows up in real timings, look at `pool_pre_ping` and per-request connection reuse first; moving to JWT would only remove the login check's share.
+
+### 2026-11-02: Top 25, and what fixed the Delhi search
+- **Context:** "devops tech lead in delhi" gave different results from adding "india" or the Delhi filter, and juniors ranked above seniors. The user asked for no hardcoded places, a shortlist of 100, regenerated embeddings, the top 25 shown, the list only after the AI finishes, and an LLM that reads facts from the search text.
+- **Learning:**
+  - Measured on the dev DB (1,001 candidates, one query, real OpenAI calls). Time is the whole search; cost is mostly the ranking. "Understanding" is the new query-reading call.
+
+    | Run | Delhi people in top 10 | Time | Cost |
+    |---|---|---|---|
+    | Shortlist 100, no understanding | 6 | 28 s | $0.053 |
+    | Shortlist 100, understanding | 6 | 24 s | $0.051 |
+    | Shortlist 100, understanding, "india" added | 5 | 25 s | $0.051 |
+    | Shortlist 100, Delhi filter | 10 | 23 s | $0.039 |
+    | Shortlist 50, no understanding | 6 | 16 s | $0.028 |
+    | Shortlist 50, understanding | 10 | 15 s | $0.026 |
+
+  - The same five Delhi DevOps people (15, 13, 10, 8 and 5 years) came first in every run. Understanding did not change that. The likely cause of the fix is location in the embedded text plus the wider shortlist, though no run isolated those two changes.
+  - Understanding costs about $0.0004 and 1 s. It matters when the city's people nearly fill the shortlist: at 50, all 25 results were in Delhi, like the filter, but DevOps leads elsewhere were crowded out.
+  - The AI's judgement still varies between runs. A 6-year Delhi DevOps engineer was "strong" in some runs and "partial" in others, and a 3-year QA engineer was "strong" once.
+  - Ranking time is almost all output generation (about 7,000 tokens for 100 profiles), so it scales with the shortlist.
+  - Regenerating embeddings needs only `rebuild-search-documents`: the API's background runner then re-embeds whatever is stale. 1,001 candidates finished within minutes of the API starting.
+  - `hnsw.ef_search` (default 40) caps rows returned whatever the `LIMIT`, so it is raised to match a wider shortlist.
+  - The unranked preview and card animation were removed at the user's request, so results now arrive only in the final `result` event.
+- **Impact / action:** `POOL_SIZE` stays 100 pending the user's decision; 50 halves cost and wait.
+
+### 2026-11-02: System page, and the taste-skill install
+- **Context:** The user wanted API status and other details in their own section, and asked for `npx skills add Leonxlnx/taste-skill` to review the UI.
+- **Learning:**
+  - `fetchReadiness` used to turn a 503 from `/ready` into `checks: {}`, because `apiRequest` throws on any non-2xx. It now reads the body itself, so the System page can say whether the database or pgvector is down.
+  - Git is now installed, so `npx skills add` works; the 2026-10-30 entry about it needing a zip download no longer applies. The skill landed in `.agents/skills/design-taste-frontend`, with a symlink at `.claude/skills/design-taste-frontend`. Both are untracked.
+  - Only one of the skill's scripts touches the network (`assets.mjs`, which downloads pictures); `lint.mjs` and `inspect.mjs` work locally. `inspect.mjs` opens its own browser with no way to sign in, so it can't reach staff pages. Staff screenshots need Playwright with the API stubbed.
+  - Most of `lint.mjs --app` doesn't apply here: test fixtures (`example.com`, `Acme`), the ✓/✗ glyphs (which have screen-reader words), and dialog shadows (allowed by the skill's own rules). The blue `#2563eb` is flagged as a framework colour, but it was the user's choice ("Plain light/dark design system").
+- **Impact / action:** The new `/api/v1/admin/system` route reads counts only. Never add candidate fields to it.
+
+### 2026-11-02: Review fixes: delete without a paid re-run, junior searches, locked rebuild
+- **Context:** Three findings from a code review of the search changes.
+- **Learning:**
+  - The AI search cache key sat under `['candidates', 'search']`, so every delete invalidated it. Because the shortlist had changed, the cached ranking couldn't be reused: each delete cost about $0.05 and about 25 s. AI results now use their own keys (`candidate-meaning-search`, `job-matches`), and a delete removes the person in place with `setQueriesData`. Trade-off: an edited name or headline shows its old value on cached AI results until the next search.
+  - The final tie-break (actual years, more wins) worked against junior searches: 3 years scored 82 and 1 year scored 90 land in the same band. Prompt `rank_v5` adds `search_wants_junior`, asked once per search like `search_names_place`, and reverses that tie-break. A word list can't do this, because senior roles often say "mentor junior engineers".
+  - `rebuild-search-documents` read profiles without a lock, so an edit saved mid-run could be overwritten with text built from the old profile. `list_candidates_with_children` now takes `FOR UPDATE OF candidates`; edits wait until the rebuild commits.
+- **Impact / action:** `rank_v5` has had no evaluation run, because there is still no `backend/evals`.
+
+### 2026-11-02: Showing that the AI is working, with real numbers
+- **Context:** The user wanted recruiters to feel the AI working, without technical words. Before, about 20 of the roughly 25 seconds sat on one spinning step with a fixed sentence.
+- **Learning:**
+  - openai 3.31's `chat.completions.stream(..., response_format=Model)` gives `content.delta` events whose `snapshot` is the text so far, and `get_final_completion()` returns the same parsed result as `parse()`. Token usage comes back only with `stream_options={"include_usage": True}`; without it a streamed call would be priced at $0.
+  - Counting `"candidate":` keys in the growing text gives an honest count. Rescanning the whole snapshot on every piece would be quadratic (about 30,000 characters over thousands of pieces), so `JudgementCounter` scans only the new text, with a 32-character overlap so a key split across pieces is still counted once.
+  - On a real search ("junior python developer in pune", 100 profiles), the count rose by 10 about every 2 s from 8 s to 25.5 s, the whole search took 25.7 s, and the ranking cost $0.049 (27,000 input and 6,400 output tokens). That is the same as without streaming. The six youngest came first (0 to 4.5 years), as `rank_v5` intends.
+  - The JSON endpoints and the job page's plain calls don't stream; only a listener (`Progress.listening`) turns it on. Test doubles answer `"stream": true` requests with SSE chunks, plus a final usage chunk.
+- **Impact / action:** The "Usually takes 20 to 30 seconds" text is a measured constant in `SearchProgress.tsx`. Update it if `POOL_SIZE` changes.
+
+### 2026-11-02: "developers in ghaziyabad" missed the one Ghaziabad developer; one search paid four times
+- **Context:** The user asked why Puneet Sehgal (Ghaziabad, 5 years, Python) wasn't in the top 25.
+- **Learning:**
+  - **The fetch was fine.** He was nearest by meaning (1st of 1,000 vectors) and in the 100 sent to the AI.
+  - **The AI invented a requirement.** Most of the 100 were mobile developers, so `rank_v5` read "developers" as mobile developers and marked his skills and experience as missed ("missing mobile development skills"). He ranked 87th. `rank_v6` judges only against what the search names: a vague "developers" is met by any software developer. With it he ranked 1st, with every criterion met.
+  - **A misspelt city fetched nobody first.** `understand_v1` returned the city as typed ("ghaziyabad"), which matches no stored city, so the step that fetches people in that city first found nobody. `understand_v2` returns the usual spelling ("Ghaziabad").
+  - **One search paid four times.** In development, React StrictMode mounts each page twice, and the search gave React Query its abort signal, so the page cancelled its request and sent a new one. The server deliberately finishes a search the page abandons, so it doesn't lose track of what it spent, so every copy was paid for. The log showed four identical streams 120 ms apart and four $0.05 rankings. The searches no longer pass an abort signal. On the server, identical rankings running at once now share one call (`_rankings_running`, a future per cache key, shielded so one caller leaving can't cancel it for the others).
+  - Unrelated, found while testing: `hnsw.ef_search` must be 1 to 1,000, so `nearest_neighbours` would fail with `count` > 1,000. The app asks for 100.
+  - Still open: the ranking judged New Delhi as "partial" location for Ghaziabad in some rows (it is commutable), so only 2 NCR people made the top 25. `rank_v6` has had no evaluation run, because there is still no `backend/evals`.
+- **Impact / action:** Any new paid call started from the page should also skip the abort signal, and get the same sharing on the server if it can be repeated. One query on seeded data is not an evaluation: `backend/evals` still doesn't exist, so `rank_v4` and `understand_v1` have had no eval run (RULES §8).
+
+### 2026-11-02: Skills and budget first; budget is a hard filter checked by code
+- **Context:** The user said a perfect candidate is best in skills and within budget. Experience comes second. Location comes second only for remote roles; otherwise it sits with skills. Before this, budget was the third sort step, and the AI judged it.
+- **Learning:**
+  - **User decisions:**
+    - over budget goes to "Filtered out" (a hard filter);
+    - no stated salary counts as within budget;
+    - for a remote role, the wanted country breaks ties (same country first).
+  - **Budget source:** the job's `salary_max` (a range with no top has no cap), or the search text read by `understand_v3` ("under 25 LPA" gives 2500000 INR). A budget without a currency is dropped, rather than dropping the city and years along with it.
+  - **Applying it:** unlike the understood city and years, an understood budget filters people out, so the first progress step says it back.
+  - **Different currencies pass** (no exchange rates, no new dependency), with the note "Expects in USD, can't compare".
+  - **Fetch:** the shortlist fetch already runs among people who pass the filters, so within-budget people fill the 100 places with no new fetch code.
+  - **Pay leaves the AI prompt:** `rank_v7` drops `search_states_pay`, `salary` and `salary_note`, and the job brief loses its pay line. So pay is no longer sent to OpenAI, and each answer is shorter (not measured).
+  - **Tests:** the tests that encoded the old order (pay as the third sort step, AI salary verdicts, salary in the prompt) were replaced, because the requirement changed. They were not weakened.
+  - **Frontend:** `FILTER_NAMES` drives the URL and the filter inputs, so the budget is not one of them. The frontend has a separate `FailedFilter` type, labelled "Budget".
+- **Impact / action:** `rank_v7` and `understand_v3` have had no evaluation run (no `backend/evals`). The draft privacy notice still says salary goes to OpenAI; that is now stricter than needed, not wrong for the earlier data.
+
+### 2026-11-02: Candidate bookmarks are one list shared by the team
+- **Context:** The user asked for favourites/bookmarks and chose a shared team list on its own sidebar page.
+- **Learning:**
+  - `candidate_bookmarks` has one row per candidate (`candidate_id` UNIQUE), so a star is team-wide and `INSERT ... ON CONFLICT DO NOTHING` keeps the first adder. Both foreign keys cascade: deleting a candidate removes its star, and the e2e teardown (which deletes users) needs no new step. Migration `e7a1c3f5b9d2` is applied to the dev DB.
+  - `GET /admin/candidates/bookmarks` must be declared before `/{candidate_id}`, or FastAPI reads "bookmarks" as an id and answers 422.
+  - The list is unpaged, which breaks RULES §5 (cursor pagination) on purpose: the stars on every page need the whole set of ids, and a team list stays in the hundreds. It is marked `shortcut:`; page it with the created_at cursor helpers if it grows.
+  - The list shows names and emails, so it writes a `candidate.search` audit row (`filters: ["bookmarked"]`). Adding and removing write `candidate.bookmark` / `candidate.unbookmark` only when a row actually changed.
+  - The frontend bookmark key sits under `['candidates', 'bookmarks']`, outside `['candidates', 'search']` and the AI result keys, so starring never re-runs a paid search. Test doubles that answer `{}` to every non-search URL must answer the bookmarks call with `{"items": []}`.
+- **Impact / action:** Personal favourites or several named lists would need an owner column and a new decision.
+
+### 2026-11-02: Resume upload and the formatted resume go through ResumeAI
+- **Context:** The user asked for resume upload that fills the profile form, and a "See resume" button showing a formatted resume. Both use ResumeAI, the user's own service (`https://ai-resume-data-extractor.onrender.com`). The user chose upload on the public form, on Add candidate and on existing profiles, and asked for the privacy notice to name ResumeAI.
+- **Learning:**
+  - ResumeAI stores extracted data under a `(candidate_id, resume_id)` pair we choose and renders the PDF from it, so we keep no file and no extracted data: only `candidates.resume_ref` (migration `f3b8d1a6c2e4`, applied to the dev DB). This departs from RULES §7 "store raw payloads first"; there is no object storage running, and ResumeAI is the store. A re-upload reuses the ref, so ResumeAI replaces the old data.
+  - The upload is the raw request body, not multipart, because FastAPI needs `python-multipart` for forms and it isn't installed. The two upload routes get a 10 MB body limit through `BodySizeLimitMiddleware(upload_paths=...)`; everything else keeps 64 KB.
+  - ResumeAI's limits are per IP, and every call comes from our server's IP, so all users share its 30 reads an hour. The public endpoint has its own per-IP limit (10 an hour) and needs the fetch header, so a cross-site page can't use up that quota.
+  - No retries on ResumeAI calls (RULES §7 asks for tenacity on raw HTTP): a person starts each call and can retry, and a failed read still counts against ResumeAI's limit. The hosted service can be slow after idling, which is why the timeout is 120 s.
+  - A ref given back by the public endpoint is unguessable (UUID4) but isn't signed. Someone who learned another person's ref could submit it with their own profile; refs are never shown in the UI.
+  - **The privacy notice changed** (resumes are sent to ResumeAI), but `PRIVACY_NOTICE_VERSION` wasn't bumped, because the notice is still a draft.
+- **Impact / action:** Set `RESUMEAI_API_KEY` in `backend/.env` and restart the API; until then both features answer 503 "isn't set up". e2e has no ResumeAI key, so upload isn't covered there.
+
+### 2026-11-02: Saved searches, and a search that stays until Clear
+- **Context:** After opening a profile from AI results and going back, the search was gone. The user asked for every search to be saved with its results (starred ones kept, in Settings), and for the search on screen to stay until Clear or a new search.
+- **Learning:**
+  - **Why it was lost.** The profile's "← Back to candidates" link and the sidebar go to a bare `/admin/candidates`, but the search lives in the URL (`?q=`). Results were also only in the React Query cache (gone after about 5 minutes or a refresh), so getting them back meant paying for the search again.
+  - **User decisions.** Every search is saved; each person sees only their own; the newest 50 un-starred are kept; starred stay; the current search survives a refresh.
+  - **Where it lives.** History stays inside `semantic_search`: a separate feature would have to import `SemanticMatch` back and create a circular import. Each shown card is a `saved_search_matches` row with `ON DELETE CASCADE` to `candidates`, so deleting a candidate also deletes the AI's saved notes about them, with no cross-feature code.
+  - **How a search is reopened.**
+    - The URL carries `search=<saved id>`, so reopening is a free GET.
+    - `localStorage` (`candidateSearch.lastSearch`) holds only that URL, so a bare `/admin/candidates` redirects to it.
+    - The redirect happens in a wrapper before the page mounts. Otherwise the search box's `useState` would already be initialised empty.
+  - **Gotchas.**
+    - `startSearch(q)` changes `q` and drops `search=` in one `setSearchParams` call, because two functional updates in the same tick can overwrite each other.
+    - jsdom keeps `localStorage` between tests, so `src/test/setup.ts` now clears it after each test; otherwise one test's search would redirect the next.
+  - **Query text is now stored** (`saved_searches.query`) for its owner. Logs and audit rows still never contain it.
+- **Impact / action:** Migration `a9c4e2d7f1b3` (additive) is applied to the dev DB. Job matches are not saved. No e2e flow covers this yet; unit and integration tests do.

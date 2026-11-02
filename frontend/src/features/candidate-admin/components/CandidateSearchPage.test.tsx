@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
@@ -134,13 +134,32 @@ describe('CandidateSearchPage', () => {
           ranked_by: 'ai',
           embedding_model: 'text-embedding-3-small',
           ranking_model: 'gpt-5.4-mini',
-          prompt_version: 'rank_v3',
+          prompt_version: 'rank_v5',
           items: [],
           filtered_out: [],
+          checked: 100,
           ...overrides,
         },
       ],
     ),
+  })
+
+  it('removes a deleted person from the AI results without paying for a new search', async () => {
+    const ravi = candidateSummary({ id: 'c-2', full_name: 'Ravi Kumar' })
+    const match = (candidate: typeof ravi) => ({ candidate, fit: 'strong', criteria: [], failed_filters: [] })
+    const fetchMock = stubApi(
+      me('admin'),
+      route('DELETE', '/api/v1/admin/candidates/c-1', { status: 204 }),
+      route('GET', meaningUrl, { ...result({ items: [match(candidateSummary()), match(ravi)] }) }),
+    )
+    const user = renderPage('/admin/candidates?q=payments+backend+engineer')
+
+    await user.click(await screen.findByRole('button', { name: 'Delete Asha Verma' }))
+    await user.click(screen.getByRole('button', { name: 'Delete permanently' }))
+
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Asha Verma' })).not.toBeInTheDocument())
+    expect(screen.getByRole('link', { name: 'Ravi Kumar' }).closest('li')).toHaveTextContent(/^1/)
+    expect(meaningCalls(fetchMock)).toHaveLength(1)
   })
 
   it('searches from a link and shows the fit with its reasons', async () => {
@@ -163,13 +182,18 @@ describe('CandidateSearchPage', () => {
     )
     renderPage('/admin/candidates?q=payments+backend+engineer')
 
-    expect(await screen.findByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Match' })).toBeInTheDocument()
-    const cell = screen.getByRole('cell', { name: /^Partial/ })
-    expect(cell).toHaveTextContent('met: Skills: Python, FastAPI')
-    expect(cell).toHaveTextContent('not met: Location: Lives in Pune')
+    const name = await screen.findByRole('link', { name: 'Asha Verma' })
+    const card = name.closest('li')
+    expect(card).toHaveTextContent('Partial match')
+    expect(card).toHaveTextContent('met: Skills: Python, FastAPI')
+    expect(card).toHaveTextContent('not met: Location: Lives in Pune')
+    expect(card).toHaveTextContent('Senior Backend Engineer · Bengaluru, IN · 6.5 yrs')
+    expect(within(card as HTMLElement).getByRole('link', { name: 'Edit Asha Verma' })).toBeInTheDocument()
+    // The email stays on the profile; a result is about why the person fits.
+    expect(card).not.toHaveTextContent('asha@example.com')
     expect(screen.getByText(/Ranked by AI/)).toBeInTheDocument()
-    expect(screen.getByText('Top 1 candidate, best match first')).toBeInTheDocument()
+    // How much work went into the list, as the one finding line.
+    expect(screen.getByText('Checked 100 profiles, best 1 shown')).toBeInTheDocument()
     // No filters, so no split into sections.
     expect(screen.queryByRole('heading', { name: 'Filtered out' })).not.toBeInTheDocument()
     expect(meaningCalls(fetchMock)[0]?.searchParams.get('q')).toBe('payments backend engineer')
@@ -195,12 +219,12 @@ describe('CandidateSearchPage', () => {
     )
     renderPage('/admin/candidates?q=fastapi+developer&city=Pune&min_years=5')
 
-    const perfect = await screen.findByRole('table', { name: 'Candidates matching every filter' })
-    const removed = screen.getByRole('table', { name: 'Search matches removed by a filter' })
+    const perfect = await screen.findByRole('list', { name: 'Candidates matching every filter' })
+    const removed = screen.getByRole('list', { name: 'Search matches removed by a filter' })
     expect(within(perfect).getByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
     expect(within(removed).getByRole('link', { name: 'Ravi Kumar' })).toBeInTheDocument()
     expect(within(removed).getByText('Fails filter: City, Min years')).toBeInTheDocument()
-    expect(screen.getByText('1 of the top 2 candidates match every filter')).toBeInTheDocument()
+    expect(screen.getByText('Checked 100 profiles, 1 meet every filter')).toBeInTheDocument()
     const params = meaningCalls(fetchMock)[0]?.searchParams
     expect([params?.get('city'), params?.get('min_years')]).toEqual(['Pune', '5'])
   })
@@ -307,9 +331,19 @@ describe('CandidateSearchPage', () => {
       vi.fn(async () => {
         const body = new ReadableStream<Uint8Array>({
           async start(controller) {
-            controller.enqueue(event('stage', { stage: 'embedding', state: 'done', detail: 'Search embedded', elapsed_ms: 140 }))
+            controller.enqueue(event('stage', { stage: 'embedding', state: 'done', detail: 'Looking first in Delhi', elapsed_ms: 140 }))
+            controller.enqueue(event('stage', { stage: 'retrieval', state: 'done', detail: 'Found 100 profiles', elapsed_ms: 40 }))
+            controller.enqueue(event('stage', { stage: 'augmentation', state: 'done', detail: null, elapsed_ms: 1 }))
+            controller.enqueue(event('stage', { stage: 'ranking', state: 'started', detail: 'AI is judging each candidate', elapsed_ms: null }))
             controller.enqueue(
-              event('stage', { stage: 'retrieval', state: 'started', detail: 'Searching profiles', elapsed_ms: null }),
+              event('stage', {
+                stage: 'ranking',
+                state: 'progress',
+                detail: 'Read 40 of 100 profiles',
+                elapsed_ms: null,
+                completed: 40,
+                total: 100,
+              }),
             )
             await finished
             controller.enqueue(event('result', JSON.parse(result().stream.split('data: ').at(-1) ?? '{}')))
@@ -322,15 +356,82 @@ describe('CandidateSearchPage', () => {
     renderPage('/admin/candidates?q=python')
 
     const steps = await screen.findByRole('list', { name: 'Search progress' })
-    await waitFor(() => expect(within(steps).getByText('Search embedded')).toBeInTheDocument())
-    expect(within(steps).getByText('140 ms')).toBeInTheDocument()
-    expect(within(steps).getByText('Retrieval').closest('li')).toHaveAttribute('data-status', 'active')
-    expect(within(steps).getByText('AI ranking').closest('li')).toHaveAttribute('data-status', 'waiting')
+    // The real count, as words and as a bar filled to the true share.
+    expect(await screen.findByText('Read 40 of 100 profiles')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Profiles judged' })).toHaveAttribute('aria-valuenow', '40')
+    expect(within(steps).getByText('Finding likely people').closest('li')).toHaveAttribute('data-status', 'done')
+    expect(within(steps).getByText('Judging each person').closest('li')).toHaveAttribute('data-status', 'active')
+    expect(within(steps).getByText('Checking filters').closest('li')).toHaveAttribute('data-status', 'waiting')
+    // What the finished steps found, said back, and an honest expectation of the wait.
+    expect(screen.getByText('Looking first in Delhi · Found 100 profiles')).toBeInTheDocument()
+    expect(screen.getByText(/Usually takes 20 to 30 seconds/)).toBeInTheDocument()
 
     finish()
 
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Search progress' })).not.toBeInTheDocument())
     expect(screen.getByText('No candidates match your search.')).toBeInTheDocument()
+  })
+
+  it('lists nobody until the AI has finished, hiding the previous search too', async () => {
+    const finishes: ((value: void) => void)[] = []
+    const encoder = new TextEncoder()
+    const asha = candidateSummary()
+    const ravi = candidateSummary({ id: 'c-2', full_name: 'Ravi Kumar' })
+    const result = (items: unknown[]) =>
+      sseBody([
+        'result',
+        {
+          filtered_out: [],
+          embedding_model: 'text-embedding-3-small',
+          ranked_by: 'ai',
+          ranking_model: 'gpt-5.4-mini',
+          prompt_version: 'rank_v5',
+          checked: 100,
+          items,
+        },
+      ])
+    const answers = [
+      result([{ candidate: asha, fit: 'weak', criteria: [], failed_filters: [] }]),
+      result([{ candidate: ravi, fit: 'strong', criteria: [], failed_filters: [] }]),
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.endsWith('/bookmarks')) return new Response('{"items":[]}', { status: 200 })
+        if (!url.includes('/semantic-search/')) return new Response('{}', { status: 200 })
+        const answer = answers.shift() ?? ''
+        const finished = new Promise<void>((resolve) => finishes.push(resolve))
+        const body = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            await finished
+            controller.enqueue(encoder.encode(answer))
+            controller.close()
+          },
+        })
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }),
+    )
+    renderPage('/admin/candidates?q=python')
+
+    await waitFor(() => expect(finishes).toHaveLength(1))
+    expect(screen.queryByRole('list', { name: 'Candidates matching your search' })).not.toBeInTheDocument()
+
+    finishes[0]?.()
+
+    await screen.findByRole('link', { name: 'Asha Verma' })
+    expect(screen.getByText('Checked 100 profiles, best 1 shown')).toBeInTheDocument()
+
+    const box = screen.getByRole('searchbox', { name: /search/i })
+    fireEvent.change(box, { target: { value: 'golang' } })
+    fireEvent.submit(box.closest('form') as HTMLFormElement)
+
+    await waitFor(() => expect(finishes).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Asha Verma' })).not.toBeInTheDocument())
+
+    finishes[1]?.()
+
+    await screen.findByText('Strong match')
+    expect(screen.getByRole('link', { name: 'Ravi Kumar' }).closest('li')).toHaveTextContent(/^1/)
   })
 
   it('shows an error when the search fails', async () => {
@@ -343,5 +444,100 @@ describe('CandidateSearchPage', () => {
     renderPage()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('An unexpected error occurred.')
+  })
+})
+
+// User decision 2026-11-02: the search on screen stays (back link, refresh, new tab) until Clear
+// or a new search, and reopening it is free.
+describe('CandidateSearchPage: the search stays until Clear or a new search', () => {
+  const streamPath = '/api/v1/semantic-search/candidates/stream'
+  const savedPath = '/api/v1/semantic-search/history/s-1'
+  const pathsCalled = (fetchMock: ReturnType<typeof stubApi>) =>
+    fetchMock.mock.calls.map(([input]) => new URL(input, 'http://localhost').pathname)
+  const resultBody = (overrides: Record<string, unknown> = {}) => ({
+    ranked_by: 'ai',
+    embedding_model: 'text-embedding-3-small',
+    ranking_model: 'gpt-5.4-mini',
+    prompt_version: 'rank_v7',
+    items: [{ candidate: candidateSummary(), fit: 'strong', criteria: [], failed_filters: [] }],
+    filtered_out: [],
+    checked: 100,
+    saved_search_id: 's-1',
+    ...overrides,
+  })
+  const savedBody = (starred = false) => ({
+    query: 'python developer',
+    filters: { country: 'IN' },
+    starred,
+    created_at: '2026-11-02T10:00:00Z',
+    result: resultBody(),
+  })
+
+  it('reopens a saved search from the URL without running it again', async () => {
+    const fetchMock = stubApi(route('GET', savedPath, { body: savedBody() }))
+    renderPage('/admin/candidates?q=python+developer&country=IN&search=s-1')
+
+    expect(await screen.findByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
+    expect(pathsCalled(fetchMock)).not.toContain(streamPath)
+    expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('python developer')
+    expect(window.localStorage.getItem('candidateSearch.lastSearch')).toBe('?q=python+developer&country=IN&search=s-1')
+  })
+
+  it('points a finished search at its saved copy, so nothing is paid for twice', async () => {
+    const fetchMock = stubApi(route('GET', streamPath, { stream: sseBody(['result', resultBody()]) }))
+    renderPage('/admin/candidates?q=python+developer')
+
+    expect(await screen.findByRole('button', { name: /Star this search/ })).toBeInTheDocument()
+    expect(window.localStorage.getItem('candidateSearch.lastSearch')).toBe('?q=python+developer&search=s-1')
+    // The saved copy came from the finished search itself: one search, and no reload of it.
+    expect(pathsCalled(fetchMock).filter((p) => p === streamPath)).toHaveLength(1)
+    expect(pathsCalled(fetchMock)).not.toContain(savedPath)
+  })
+
+  it('reopens the last search when the page is opened bare (back link, sidebar, new tab)', async () => {
+    window.localStorage.setItem('candidateSearch.lastSearch', '?q=python+developer&country=IN&search=s-1')
+    const fetchMock = stubApi(route('GET', savedPath, { body: savedBody() }))
+    renderPage('/admin/candidates')
+
+    expect(await screen.findByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('python developer')
+    expect(pathsCalled(fetchMock)).not.toContain(streamPath)
+  })
+
+  it('forgets the search on Clear', async () => {
+    stubApi(
+      route('GET', savedPath, { body: savedBody() }),
+      route('GET', '/api/v1/admin/candidates', { body: { items: [], next_cursor: null } }),
+    )
+    const user = renderPage('/admin/candidates?q=python+developer&search=s-1')
+    await screen.findByRole('link', { name: 'Asha Verma' })
+
+    await user.click(screen.getByRole('button', { name: 'Clear all' }))
+
+    await screen.findByText('No candidates match your search.')
+    expect(window.localStorage.getItem('candidateSearch.lastSearch')).toBeNull()
+  })
+
+  it('stars the search on screen', async () => {
+    const fetchMock = stubApi(
+      route('GET', savedPath, { body: savedBody() }),
+      route('PUT', `${savedPath}/star`, { status: 204 }),
+    )
+    const user = renderPage('/admin/candidates?q=python+developer&search=s-1')
+
+    await user.click(await screen.findByRole('button', { name: /Star this search/ }))
+
+    const star = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/star'))
+    expect(JSON.parse(String(star?.[1]?.body))).toEqual({ starred: true })
+  })
+
+  it('says so when the saved search is gone', async () => {
+    stubApi(route('GET', savedPath, { status: 404, body: { error: { code: 'saved_search_not_found', message: 'Gone', details: {} } } }))
+    renderPage('/admin/candidates?q=python+developer&search=s-1')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This saved search is no longer available. Press Search to run it again.',
+    )
+    expect(screen.getByRole('searchbox', { name: 'Search' })).toHaveValue('python developer')
   })
 })

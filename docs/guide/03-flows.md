@@ -89,6 +89,23 @@ candidates/router.py  submit_candidate
 
 Nothing is "queued" for embedding. The new candidate simply has no vector yet, so the background scan finds it within ~2 seconds (flow 4).
 
+### Uploading a resume while filling in the form
+
+The public form and **Add candidate** both start with an optional Resume section (`ResumeUpload`).
+
+```
+browser: choose a file (≤ 10 MB, PDF / DOC / DOCX / TXT)
+  └─ POST /api/v1/resumes   raw file as the body
+       resumes.service.read_new_resume
+         ├─ resume_ref = new UUID
+         ├─ ResumeAI POST /api/public/resumes  (candidate_id = resume_ref, resume_id = "resume")   5-30 s
+         └─ mapping.to_profile → suggestions
+browser: fillFromResume fills only the fields still empty, says which, and keeps resume_ref in the form
+  └─ submit → POST /api/v1/candidates (or /admin/candidates) with resume_ref → stored on the candidate
+```
+
+On a saved profile, **Upload resume** (`PUT .../{id}/resume`) does the same read but changes no profile field, and **See resume** opens `GET .../{id}/resume` in a new tab, which asks ResumeAI to render the formatted PDF.
+
 ---
 
 ## 3. Staff edit a candidate
@@ -197,18 +214,21 @@ semantic_search/service.py  search_by_meaning
   │                            (the query goes to OpenAI; emails and phones must not)
   ├─ get_embedding_provider()  no API key → 503
   ├─ STAGE embedding:  _embed_query → metered_call(embed [q])          timeout (10 s) or error → 503, budget used up → 402
+  │                    understanding.understand_query(q)                   city, country, min years; any failure → None
   ├─ _find_rank_and_filter
   │    ├─ STAGE retrieval:
   │    │    hybrid_ids(within):
-  │    │       nearest  = embeddings.nearest_candidates_to_vector(vector, 20, within)   meaning
-  │    │       keywords = candidates.full_text_candidate_ids(q, 20, within)             exact words
-  │    │       fuse(nearest, keywords) → best 20                                        RRF merge
-  │    │    with filters:   best 20 among people who pass + best 10 of everyone else
-  │    │    without:        best 20 overall
+  │    │       nearest  = embeddings.nearest_candidates_to_vector(vector, 100, within)  meaning
+  │    │       keywords = candidates.full_text_candidate_ids(q, 100, within)            exact words
+  │    │       fuse(nearest, keywords) → best 100                                       RRF merge
+  │    │    with filters:   best 100 among people who pass + best 10 of everyone else
+  │    │    without:        best 100 overall
+  │    │    facts read from q: people who also fit them go first in the 100
   │    │    pool = candidates.get_rankable_candidates(ids)
   │    ├─ STAGE augmentation:  ranking.build_prompt(q, pool)      anonymised JSON, no names
   │    ├─ STAGE ranking:       _rank_with_llm
   │    │      ├─ same query + same profiles in the last 10 min? reuse the cached answer (free)
+  │    │      ├─ the same ranking already running (second tab, page re-sent it)? wait for it, don't pay again
   │    │      ├─ metered_call(client.parse(... schema=RankingAnswer))     gpt-5.4-mini
   │    │      ├─ any failure (no key, budget, timeout) → None → keep the hybrid order, ranked_by="search"
   │    │      └─ ranking.rank_by_judgements(answer, pool, required_work_mode)
@@ -221,33 +241,66 @@ semantic_search/service.py  search_by_meaning
 ### Why fetch two lists (meaning + keywords)?
 
 - Vectors find "the right kind of person" (a "backend engineer" query finds Django developers), but they are weak on exact facts like a city name or "5 years".
-- Full-text search catches exact words. Its index (`search_tsv`) also includes the **city**, which the redacted search document leaves out.
+- Full-text search catches exact words, including the city and country, which the search document states in its `Location:` line.
 - Merging both (RRF) gives a better shortlist than either alone.
 
 ### How the LLM's answer becomes an order
 
 The LLM only **judges**. Our code **orders** (`ranking.to_match` and `rank_by_judgements`). That makes the order reproducible and keeps simple rules out of the model's hands.
 
-For each candidate the LLM returns: `skills_score` (0-100), a `location` verdict, `experience_score`, a `salary` verdict, and short notes. Once per search it also says `search_names_place` and `search_states_pay`.
+For each candidate the LLM returns: `skills_score` (0-100), a `location` verdict, `experience_score`, and short notes. Once per search it also says `search_names_place` and `search_wants_junior` (the role itself is junior or entry-level, not a senior role that mentors juniors). It never sees pay: the budget is a hard filter checked by code (below).
 
-The sort key, highest first:
+The sort key, highest first (user decision 2026-11-02: skills and budget come first, location only when the role isn't remote, experience second):
 
-1. **skills met** (score ≥ 60 → 1 point) **+ location points** (1 met, 0.5 partial, 0 missed)
-2. skills score
-3. salary points (only when the search or job states pay)
-4. experience score
+1. **skills met** (score ≥ 60 → 1 point) **+ location points** (1 met, 0.5 partial, 0 missed), the location part only when the role is **not remote**
+2. skills score, in bands 20 points wide (a few points' difference is noise)
+3. experience score, in the same bands
+4. for a remote role only: in the wanted country (the job's country, or the search's) before outside it
+5. actual years of experience: more years first, or fewer when `search_wants_junior`
+
+**Budget** is a hard filter, so over-budget people go to "Filtered out" with "Fails filter: Budget". It comes from the job's `salary_max` (a range with no top has no cap), or from the search text ("under 25 LPA", read by `understanding`), unless a `max_salary` was passed explicitly. Only a stated salary **in the same currency** above the budget fails; no stated salary and another currency both pass (there are no exchange rates). The salary criterion on each card is built by code: "Expects 1,800,000 INR, budget 2,400,000 INR".
 
 Code-level guards on the LLM's answers:
 
 - **Work mode is plain logic** (`fits_work_mode`): someone who accepts office work fits office, hybrid and remote roles; hybrid fits hybrid and remote; remote fits remote only.
 - If the search names a place, a `not_required` location verdict counts as missed (it once let a remote-working Berlin profile outrank a local one).
 - "Willing to relocate" only counts if the profile actually says `open_to_relocation = true`.
-- A salary verdict of `within`/`above` for a candidate with no stated salary becomes `unknown`.
 - A candidate the LLM forgot to judge is kept at the bottom, not dropped.
 
 ### Why filter after ranking?
 
-The recruiter asked to see strong candidates that a filter removed. So filters don't throw people away; they **split** the ranked list. But filtering only after a top-20 fetch could hide real matches, so when filters are set the fetch runs twice: once only among people who pass (`candidates.candidate_ids_passing` as a subquery), once among everyone. Up to 30 profiles go to the LLM in one call.
+The recruiter asked to see strong candidates that a filter removed. So filters don't throw people away; they **split** the ranked list. But filtering only after a fetch could hide real matches, so when filters are set the fetch runs twice: once only among people who pass (`candidates.candidate_ids_passing` as a subquery), once among everyone. Up to 110 profiles go to the LLM in one call; the page gets the best 25, plus up to 10 filtered out.
+
+### A place typed in the search text
+
+`understanding.understand_query` makes one small LLM call that reads the city, country, minimum years and budget (yearly amount + currency) the text states. Skills are left out on purpose: vectors and full text handle them, and exact tags would lose people tagged differently.
+
+People who fit the city, country and years take the first places in the shortlist, and everyone else fills the rest. Those three are **not filters**: they never add a "Fails filter" or remove anyone, and a filter the recruiter set wins over them. The **budget is the exception**: it becomes a hard filter, so the first progress step says it back ("budget up to 2,500,000 INR"). A budget without a currency is dropped. If the call fails, the search runs without the facts. The answer is cached for 10 minutes, because a different answer on a repeat would change the shortlist and pay for a new ranking.
+
+### Saved searches: reopening without paying again
+
+User decisions (2026-11-02):
+- every search is saved;
+- each person sees only their own;
+- the newest 50 un-starred searches are kept;
+- starred ones stay;
+- the search on screen stays until Clear or a new search, even after a refresh.
+
+```
+search_by_meaning
+  └─ same transaction as the candidate.search audit row:
+       history.save_search      saved_searches row (query, URL filters, models, counts)
+                                + one saved_search_matches row per card (section, position, fit, criteria, failed filters)
+       repository.prune_history drop this user's un-starred searches beyond the newest 50
+  → result.saved_search_id
+```
+
+- **Reopening a search:** the page then sets `search=<id>` in the URL and remembers that URL in `localStorage` (`candidateSearch.lastSearch`). Opening `?...&search=<id>` calls `GET /semantic-search/history/{id}`. That shows the saved order and the AI's reasons with each candidate's **current** summary, and makes **no AI call**.
+- **The back link and sidebar:** a bare `/admin/candidates` (the profile's back link, the sidebar) redirects to the remembered URL.
+- **Ending the search:** Clear, emptying the box, or pressing Search ends it.
+- **Deleted candidates:** match rows reference `candidates.id` with `ON DELETE CASCADE`, so deleting a candidate removes them, and the AI's notes about them, from every saved search.
+- **Another person's id:** it answers 404 (never 403), so ids leak nothing.
+- **The query text:** this is the only place it is stored. Logs and audit rows still never contain it.
 
 ---
 
@@ -263,8 +316,8 @@ service.match_job
   ├─ STAGE embedding: embeddings.load_job_vector         uses the job's STORED vector: no new AI call
   │      None (not embedded yet, or text changed since) → 409 job_not_ready_for_matching
   ├─ keywords = job title + must-have skills + city
-  ├─ brief    = job.search_document + pay line ("Pay: 60000-90000 EUR per year.")
-  ├─ filters  = job_filters(job)    min years, must-have skills, country; city only if not remote
+  ├─ brief    = job.search_document                     never the pay; code checks the budget
+  ├─ filters  = job_filters(job)    min years, must-have skills, country, budget (salary_max); city only if not remote
   ├─ _find_rank_and_filter(...)     same pipeline as search (section 6)
   └─ record_event("job.match")
 ```
@@ -275,16 +328,21 @@ The button stays disabled until the job's embedding is ready. The job page polls
 
 ## 8. Streaming the steps to the browser (SSE)
 
-A search takes a few seconds. To show progress, the `/stream` endpoints answer `text/event-stream`:
+A search takes about 25 seconds, nearly all of it the AI ranking. To show progress, the `/stream` endpoints answer `text/event-stream`:
 
 ```
 event: stage
-data: {"stage":"embedding","state":"started","detail":"Turning your search into an embedding"}
+data: {"stage":"embedding","state":"started","detail":"Working out what you're looking for"}
 
 event: stage
-data: {"stage":"embedding","state":"done","detail":"Search embedded","elapsed_ms":412}
+data: {"stage":"embedding","state":"done","detail":"Looking first in Delhi","elapsed_ms":412}
 
-... retrieval, augmentation, ranking, filtering ...
+... retrieval, augmentation, ranking started ...
+
+event: stage
+data: {"stage":"ranking","state":"progress","detail":"Read 40 of 100 profiles","completed":40,"total":100}
+
+... more counts, ranking done, filtering ...
 
 event: result
 data: { ...the same JSON as the non-stream endpoint... }
@@ -293,6 +351,9 @@ data: { ...the same JSON as the non-stream endpoint... }
 How it works:
 
 - The service functions take an optional `Progress` object (`semantic_search/progress.py`) and call `progress.start(...)` / `progress.done(...)`. Without a listener, those calls do nothing, which is why the plain JSON endpoints share the same code.
+- Stage events carry counts, and the embedding step's detail says back the place and years read from the search ("Looking first in Delhi, 5+ years"), never the search text itself. Profiles arrive only in the final `result`, so the page lists nobody until the AI has finished (user decision).
+- **Live count while the AI judges.** When someone is listening (`Progress.listening`), the ranking call streams the AI's answer (`OpenAIChatClient.parse(on_text=...)`). `JudgementCounter` counts `"candidate":` keys in the text so far, scanning only new text, and a `progress` event goes out every 10 profiles and at the last one. The JSON endpoints don't stream. Streaming asks for `include_usage`, so the call is still priced from its real tokens.
+- `result.checked` is how many profiles were fetched and ranked; the page shows it as "Checked 100 profiles, best 25 shown".
 - `streaming.stream_search` runs the search in its **own asyncio task with its own DB session**. Each stage event is put on an `asyncio.Queue`; the response reads from the queue and yields text.
 - Errors after the response has started can't change the HTTP status (already sent), so they are sent as an `event: error` with `status`, `code` and `message`. Validation and auth errors happen before streaming starts and still come back as normal JSON errors.
 - If the browser disconnects, the task is **not** cancelled. Cancelling a paid call mid-flight would leave its cost unrecorded. `_running` keeps a reference so the task isn't garbage-collected.
@@ -317,6 +378,10 @@ candidates/service.py  search_candidates
 **Keyset pagination:** instead of `OFFSET 50`, the next page asks for rows *after* the last row seen: `WHERE (created_at, id) < (:last_created_at, :last_id)`. It stays fast on big tables and doesn't skip or repeat rows when new ones are added. The cursor is just that position as base64 JSON.
 
 The hard filters here use the same SQL (`hard_filter_clauses`) as the search-by-meaning prefilter, so both screens agree on who passes.
+
+### Bookmarking a candidate
+
+The star on a row, card or profile calls `PUT /api/v1/admin/candidates/{id}/bookmark` (or `DELETE` to remove it). There is one list for the whole team: `candidate_bookmarks` has one row per candidate, so a second star by someone else changes nothing and the first adder stays. The Bookmarks page reads `GET /api/v1/admin/candidates/bookmarks`. No AI is involved, and starring never re-runs a search.
 
 ---
 

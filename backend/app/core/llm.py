@@ -4,16 +4,19 @@ Answers are parsed into a Pydantic model by the SDK's structured outputs, never 
 Nothing here logs prompts or answers.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import httpx2
 import openai
+from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel, ValidationError
 
 from app.core.config import OPENAI_BASE_URL, get_settings
 
 # Interactive calls: one attempt, so a slow answer fails fast and is still metered as failed.
-TIMEOUT_SECONDS = 20.0
+# A non-streamed answer sends nothing until it is complete, and ranking 100 profiles is slow.
+TIMEOUT_SECONDS = 180.0
 
 
 class LLMError(Exception):
@@ -65,19 +68,38 @@ class OpenAIChatClient:
         content: str,
         schema: type[T],
         max_output_tokens: int,
+        on_text: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResult[T]:
+        """With `on_text`, the answer is streamed and `on_text` gets the text so far after each
+        piece, so a caller can show progress; the result is the same either way."""
+        messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": content},
+        ]
         try:
-            completion = await self._client.chat.completions.parse(
-                model=model,
-                messages=[
-                    {"role": "system", "content": instructions},
-                    {"role": "user", "content": content},
-                ],
-                response_format=schema,
-                max_completion_tokens=max_output_tokens,
-                # gpt-5.4 models accept none/low/medium/high/xhigh; low keeps judgement cheap.
-                reasoning_effort="low",
-            )
+            if on_text is None:
+                completion = await self._client.chat.completions.parse(
+                    model=model,
+                    messages=messages,
+                    response_format=schema,
+                    max_completion_tokens=max_output_tokens,
+                    # gpt-5.4 models accept none/low/medium/high/xhigh; low keeps judgement cheap.
+                    reasoning_effort="low",
+                )
+            else:
+                async with self._client.chat.completions.stream(
+                    model=model,
+                    messages=messages,
+                    response_format=schema,
+                    max_completion_tokens=max_output_tokens,
+                    reasoning_effort="low",
+                    # Without this a streamed answer reports no token usage, so it can't be priced.
+                    stream_options={"include_usage": True},
+                ) as stream:
+                    async for event in stream:
+                        if event.type == "content.delta":
+                            await on_text(event.snapshot)
+                    completion = await stream.get_final_completion()
         except openai.APIStatusError as exc:
             raise LLMError(type(exc).__name__, status_code=exc.status_code) from exc
         except openai.OpenAIError as exc:

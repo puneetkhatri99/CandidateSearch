@@ -1,12 +1,20 @@
 import { createBrowserRouter } from 'react-router'
 import { AiSpendPage } from '@/features/ai-usage'
 import { ChangePasswordPage, LoginPage, RequireAuth, RequireRole } from '@/features/auth'
-import { CandidateCreatePage, CandidateDetailPage, CandidateSearchPage } from '@/features/candidate-admin'
+import {
+  BookmarksPage,
+  CandidateCreatePage,
+  CandidateDetailPage,
+  CandidateSearchPage,
+  SavedSearchesPage,
+} from '@/features/candidate-admin'
 import { CandidateIntakePage, PrivacyNoticePage } from '@/features/candidate-intake'
 import { JobCreatePage, JobDetailPage, JobListPage } from '@/features/jobs'
+import { SystemPage } from '@/features/system-status'
 import { UserListPage } from '@/features/user-admin'
 import { HomePage, NotFoundPage } from './pages'
 import { PublicLayout, RootLayout } from './RootLayout'
+import { SettingsPage } from './SettingsPage'
 
 const routes = [
   {
@@ -32,9 +40,13 @@ const routes = [
           { path: '/admin/candidates', element: <CandidateSearchPage /> },
           { path: '/admin/candidates/new', element: <CandidateCreatePage /> },
           { path: '/admin/candidates/:id', element: <CandidateDetailPage /> },
+          { path: '/admin/bookmarks', element: <BookmarksPage /> },
           { path: '/jobs', element: <JobListPage /> },
           { path: '/jobs/new', element: <JobCreatePage /> },
           { path: '/jobs/:id', element: <JobDetailPage /> },
+          { path: '/admin/system', element: <SystemPage /> },
+          { path: '/settings', element: <SettingsPage /> },
+          { path: '/settings/searches', element: <SavedSearchesPage /> },
           {
             element: <RequireRole role="admin" />,
             children: [{ path: '/admin/users', element: <UserListPage /> }],

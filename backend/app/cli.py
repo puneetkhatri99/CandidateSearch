@@ -1,6 +1,7 @@
 """Operational commands.
 
     python -m app.cli create-admin --email you@company.com --name "Your Name"
+    python -m app.cli rebuild-search-documents
     python -m app.cli embed-backfill
     python -m app.cli maintenance [--once]
 
@@ -26,6 +27,7 @@ from app.core.errors import AppError
 from app.core.logging import configure_logging
 from app.core.maintenance import run_maintenance
 from app.features.auth import Role, create_user
+from app.features.candidates import rebuild_search_documents
 from app.features.embeddings import TARGETS, embed_stale
 from app.maintenance import maintenance_tasks
 
@@ -84,6 +86,15 @@ async def _embed_backfill() -> None:
         await get_engine().dispose()
 
 
+async def _rebuild_search_documents() -> None:
+    try:
+        async with get_sessionmaker()() as session:
+            changed = await rebuild_search_documents(session)
+        logger.info("search_documents_rebuilt", changed=changed)
+    finally:
+        await get_engine().dispose()
+
+
 async def _maintenance(once: bool) -> None:
     try:
         await run_maintenance(maintenance_tasks(), once=once)
@@ -114,6 +125,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("embed-backfill", help="embed every stale candidate and job, then exit")
+    commands.add_parser(
+        "rebuild-search-documents",
+        help="rewrite candidate documents after their format changes; run embed-backfill next",
+    )
     maintenance = commands.add_parser(
         "maintenance", help="run the background tasks: embed stale documents, prune old rows"
     )
@@ -129,6 +144,9 @@ def main() -> None:
     register_all_models()
     if args.command == "embed-backfill":
         _run_embed_backfill()
+        return
+    if args.command == "rebuild-search-documents":
+        asyncio.run(_rebuild_search_documents())
         return
     if args.command == "maintenance":
         _run_maintenance_command(args.once)

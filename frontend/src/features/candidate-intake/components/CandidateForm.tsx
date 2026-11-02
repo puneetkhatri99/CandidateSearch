@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { FormProvider, useForm, useFormContext } from 'react-hook-form'
 import { Link } from 'react-router'
-import { applyProfileServerError, ProfileFields } from '@/features/candidate-profile'
+import { applyProfileServerError, ProfileFields, ResumeUpload } from '@/features/candidate-profile'
 import { Alert, Button, Checkbox, FormSection } from '@/shared/ui'
 import { useCreateCandidate } from '../hooks/useCreateCandidate'
 import { type CandidateFormValues, type CandidatePayload, candidateFormSchema, emptyCandidateForm } from '../schema'
@@ -74,6 +74,7 @@ export function CandidateForm({ onSubmitted, defaultValues }: CandidateFormProps
   return (
     <FormProvider {...form}>
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="relative grid gap-10">
+        <ResumeUpload audience="candidate" />
         <ProfileFields />
         <ConsentAndHoneypot />
 

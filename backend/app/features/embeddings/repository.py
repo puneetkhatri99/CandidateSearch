@@ -49,6 +49,7 @@ _PERMANENT_ERROR_PREFIX = "PermanentEmbeddingError"
 RETRY_BASE_SECONDS = 30
 RETRY_GROWTH = 4
 MAX_TRANSIENT_ATTEMPTS = 5
+DEFAULT_EF_SEARCH = 40  # pgvector's default; smaller searches keep this recall
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,15 @@ class EmbeddingRow:
     entity_id: uuid.UUID
     content_hash: str
     vector: list[float]
+
+
+@dataclass(frozen=True)
+class EmbeddingCounts:
+    total: int
+    # The stored vector was made from today's document.
+    current: int
+    # A failure is recorded for today's document (given up, or waiting to retry).
+    failed: int
 
 
 @dataclass(frozen=True)
@@ -218,6 +228,36 @@ async def find_stale_ids(
     return list((await session.scalars(statement)).all())
 
 
+async def count_embeddings(
+    session: AsyncSession, model: str, *, target: EmbeddingTarget
+) -> EmbeddingCounts:
+    """How many entities there are, how many have an up-to-date vector, how many failed.
+
+    shortcut: hashes every document like find_stale_ids, fine for ~1,000 rows; switch to a stored
+    hash column around 100k.
+    """
+    source, embeddings, failures = target.source, target.embeddings, target.failures
+    document_hash = _document_hash(target)
+    statement = (
+        select(
+            func.count(),
+            func.count().filter(embeddings.c.content_hash == document_hash),
+            func.count().filter(failures.c.content_hash == document_hash),
+        )
+        .select_from(source)
+        .outerjoin(
+            embeddings,
+            and_(_entity(target, "embeddings") == source.c.id, embeddings.c.model == model),
+        )
+        .outerjoin(
+            failures,
+            and_(_entity(target, "failures") == source.c.id, failures.c.model == model),
+        )
+    )
+    total, current, failed = (await session.execute(statement)).one()
+    return EmbeddingCounts(total=total, current=current, failed=failed)
+
+
 async def load_embedding_hash(
     session: AsyncSession, entity_id: uuid.UUID, model: str, *, target: EmbeddingTarget
 ) -> str | None:
@@ -300,9 +340,14 @@ async def nearest_neighbours(
     limit: int,
     within: Select[uuid.UUID] | None = None,
 ) -> list[tuple[uuid.UUID, float]]:
+    # The index returns at most ef_search neighbours (40 by default), whatever the LIMIT says.
+    await session.execute(
+        text("SELECT set_config('hnsw.ef_search', :size, true)"),
+        {"size": str(max(limit, DEFAULT_EF_SEARCH))},
+    )
     if within is not None:
-        # The index returns ef_search (40) neighbours before the filter runs; with a selective
-        # filter few would survive. Iterative scan keeps searching until `limit` pass.
+        # ef_search neighbours come back before the filter runs; with a selective filter few
+        # would survive. Iterative scan keeps searching until `limit` pass.
         await session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
     result = await session.execute(similarity_statement(query_vector, model, limit, within))
     # relaxed_order may return neighbours slightly out of order.

@@ -2,12 +2,20 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { FormProvider, useForm, useFormContext } from 'react-hook-form'
 import { Link, useNavigate } from 'react-router'
 import { z } from 'zod'
-import { applyProfileServerError, candidateProfileSchema, emptyProfile, ProfileFields } from '@/features/candidate-profile'
+import {
+  applyProfileServerError,
+  candidateProfileSchema,
+  emptyProfile,
+  ProfileFields,
+  ResumeUpload,
+} from '@/features/candidate-profile'
 import { Alert, Button, Checkbox, FormSection, PageHeader } from '@/shared/ui'
 import { useCreateStaffCandidate } from '../hooks'
 
 const staffCreateSchema = candidateProfileSchema.extend({
   consent_confirmed: z.boolean().refine((v) => v, 'Confirm the candidate agreed to the privacy notice.'),
+  // Set by ResumeUpload; links the uploaded resume to the new profile.
+  resume_ref: z.string().transform((v) => (v === '' ? null : v)),
 })
 type StaffCreateValues = z.input<typeof staffCreateSchema>
 type StaffCreatePayload = z.output<typeof staffCreateSchema>
@@ -42,7 +50,7 @@ export function CandidateCreatePage() {
   const create = useCreateStaffCandidate()
   const form = useForm<StaffCreateValues, unknown, StaffCreatePayload>({
     resolver: zodResolver(staffCreateSchema),
-    defaultValues: { ...emptyProfile(), consent_confirmed: false },
+    defaultValues: { ...emptyProfile(), consent_confirmed: false, resume_ref: '' },
     mode: 'onTouched',
   })
   const {
@@ -54,7 +62,7 @@ export function CandidateCreatePage() {
   const onSubmit = async (payload: StaffCreatePayload) => {
     try {
       const created = await create.mutateAsync(payload)
-      navigate(`/admin/candidates/${created.id}`, { replace: true })
+      navigate(`/admin/candidates/${created.id}`, { replace: true, state: { created: true, withResume: payload.resume_ref !== null } })
     } catch (error) {
       applyProfileServerError(error, setError)
     }
@@ -68,6 +76,7 @@ export function CandidateCreatePage() {
       <PageHeader title="Add candidate" />
       <FormProvider {...form}>
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="grid gap-10">
+          <ResumeUpload audience="staff" />
           <ProfileFields />
           <ConsentConfirmation />
           {errors.root?.server?.message && <Alert>{errors.root.server.message}</Alert>}

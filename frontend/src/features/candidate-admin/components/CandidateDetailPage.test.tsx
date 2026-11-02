@@ -11,7 +11,7 @@ const me = (role: 'admin' | 'recruiter') =>
   route('GET', '/api/v1/auth/me', { body: { id: 'u-1', email: 'staff@example.com', full_name: 'Staff', role } })
 const detail = route('GET', '/api/v1/admin/candidates/c-1', { body: candidateDetail() })
 
-function renderPage(initialUrl = '/admin/candidates/c-1') {
+function renderPage(initialUrl: string | { pathname: string; state: unknown } = '/admin/candidates/c-1') {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={[initialUrl]}>
@@ -106,6 +106,66 @@ describe('CandidateDetailPage', () => {
     expect(await screen.findByText(/changed by someone else/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Discard my changes and reload' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument())
+  })
+
+  it('stars the candidate for the team', async () => {
+    let items: unknown[] = []
+    const fetchMock = stubApi(
+      me('recruiter'),
+      detail,
+      route('GET', '/api/v1/admin/candidates/bookmarks', () => ({ body: { items } })),
+      route('PUT', '/api/v1/admin/candidates/c-1/bookmark', () => {
+        items = [{ candidate: { ...candidateDetail(), top_skills: [] }, added_by_name: 'Staff', added_at: '2026-11-02T10:00:00Z' }]
+        return { status: 204 }
+      }),
+    )
+    const user = renderPage()
+
+    const star = await screen.findByRole('button', { name: 'Bookmark Asha Verma' })
+    await waitFor(() => expect(star).toBeEnabled())
+    expect(star).toHaveAttribute('aria-pressed', 'false')
+    await user.click(star)
+
+    await waitFor(() => expect(star).toHaveAttribute('aria-pressed', 'true'))
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+  })
+
+  it('links to the formatted resume when there is one', async () => {
+    stubApi(me('recruiter'), route('GET', '/api/v1/admin/candidates/c-1', { body: candidateDetail({ has_resume: true }) }))
+    renderPage()
+
+    const link = await screen.findByRole('link', { name: 'See resume' })
+    expect(link).toHaveAttribute('href', '/api/v1/admin/candidates/c-1/resume')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(screen.getByRole('button', { name: 'Replace resume' })).toBeInTheDocument()
+  })
+
+  it('confirms a just-added candidate and their attached resume', async () => {
+    stubApi(me('recruiter'), route('GET', '/api/v1/admin/candidates/c-1', { body: candidateDetail({ has_resume: true }) }))
+    renderPage({ pathname: '/admin/candidates/c-1', state: { created: true, withResume: true } })
+
+    expect(await screen.findByText(/Candidate added\. Their resume is attached/)).toBeInTheDocument()
+  })
+
+  it('uploads a resume without editing the profile, then offers See resume', async () => {
+    let hasResume = false
+    const fetchMock = stubApi(
+      me('recruiter'),
+      route('GET', '/api/v1/admin/candidates/c-1', () => ({ body: candidateDetail({ has_resume: hasResume }) })),
+      route('PUT', '/api/v1/admin/candidates/c-1/resume', () => {
+        hasResume = true
+        return { status: 204 }
+      }),
+    )
+    const user = renderPage()
+
+    expect(await screen.findByText('No resume uploaded yet.')).toBeInTheDocument()
+    const file = new File(['resume'], 'cv.docx')
+    await user.upload(screen.getByLabelText('Resume file'), file)
+
+    expect(await screen.findByRole('link', { name: 'See resume' })).toBeInTheDocument()
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(put?.[1]?.body).toBe(file)
   })
 
   it('shows not-found for a deleted candidate', async () => {

@@ -29,6 +29,7 @@ export const candidateDetail = (overrides: Partial<CandidateDetail> = {}): Candi
   source: 'manual',
   consent_given_at: '2026-10-27T10:00:00Z',
   consent_version: '2026-10-draft',
+  has_resume: false,
   created_at: '2026-10-27T10:00:00Z',
   updated_at: '2026-10-28T10:00:00Z',
   ...overrides,

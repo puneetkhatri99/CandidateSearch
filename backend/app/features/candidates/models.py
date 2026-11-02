@@ -15,6 +15,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    Uuid,
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
@@ -55,8 +56,8 @@ class Candidate(TimestampedModel):
     source: Mapped[str] = mapped_column(String(30), server_default=text("'manual'"))
     source_ref: Mapped[str | None] = mapped_column(String(200))
     search_document: Mapped[str] = mapped_column(Text)
-    # Full-text index of the profile plus city (search_document leaves location out), maintained
-    # by Postgres; deferred so no load reads it.
+    # Full-text index of the profile plus city, maintained by Postgres; deferred so no load
+    # reads it.
     search_tsv: Mapped[str] = mapped_column(
         TSVECTOR,
         Computed(SEARCH_TSV_EXPRESSION, persisted=True),
@@ -69,6 +70,9 @@ class Candidate(TimestampedModel):
     consent_recorded_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+
+    # The pair ResumeAI stores this person's resume data under (see features/resumes).
+    resume_ref: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
     # Optimistic locking: SQLAlchemy adds "WHERE version = :loaded" to every UPDATE.
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
@@ -138,6 +142,19 @@ class CandidateExperience(TimestampedModel):
 
     __table_args__ = (
         CheckConstraint("end_month IS NULL OR end_month >= start_month", name="dates_ordered"),
+    )
+
+
+class CandidateBookmark(TimestampedModel):
+    """One shared team bookmark per candidate; whoever starred it first is kept."""
+
+    __tablename__ = "candidate_bookmarks"
+
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("candidates.id", ondelete="CASCADE"), unique=True
+    )
+    added_by: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
 
 

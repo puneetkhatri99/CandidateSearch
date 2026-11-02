@@ -15,6 +15,7 @@ function renderAt(path: string, role: 'admin' | 'recruiter', mustChangePassword 
             <Route path="/jobs" element={<p>jobs</p>} />
             <Route path="/jobs/new" element={<p>new job</p>} />
             <Route path="/jobs/:id" element={<p>one job</p>} />
+            <Route path="/admin/users" element={<p>users</p>} />
           </Route>
           <Route element={<PublicLayout />}>
             <Route path="/account/password" element={<p>password</p>} />
@@ -29,20 +30,26 @@ const sidebar = () => screen.getByRole('navigation', { name: 'Main' })
 const labels = () => Array.from(sidebar().querySelectorAll('a')).map((link) => link.textContent)
 
 describe('RootLayout navigation', () => {
-  it('lists the staff pages in order, with Users only for admins', async () => {
+  it('lists the staff pages in order, with Users and System under Settings', async () => {
     renderAt('/jobs', 'admin')
 
-    await screen.findByRole('link', { name: 'Users' })
+    await screen.findByText('Staff Member')
 
-    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Jobs', 'Add job', 'AI spending', 'Users'])
+    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Bookmarks', 'Jobs', 'Add job', 'AI spending', 'Settings'])
   })
 
-  it('hides Users from recruiters', async () => {
+  it('marks Settings active on the pages it opens', async () => {
+    renderAt('/admin/users', 'admin')
+
+    expect(await screen.findByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('shows no API status line in the sidebar', async () => {
     renderAt('/jobs', 'recruiter')
 
     await screen.findByText('Staff Member')
 
-    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Jobs', 'Add job', 'AI spending'])
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
   it('marks Add job active on /jobs/new and Jobs active on other job paths', async () => {
@@ -58,11 +65,6 @@ describe('RootLayout navigation', () => {
     expect(screen.getByRole('link', { name: 'Add job' })).not.toHaveAttribute('aria-current')
   })
 
-  it('offers a change-password link in the user menu', async () => {
-    renderAt('/jobs', 'recruiter')
-
-    expect(await screen.findByRole('link', { name: 'Change password' })).toHaveAttribute('href', '/account/password')
-  })
 })
 
 describe('PublicLayout navigation', () => {

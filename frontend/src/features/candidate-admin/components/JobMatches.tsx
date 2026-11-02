@@ -12,10 +12,12 @@ interface JobMatchesProps {
   ready: boolean
 }
 
-/** "Find candidates" for a job: an AI ranking (about $0.02) that runs only when asked. */
+/** "Find candidates" for a job: an AI ranking (about $0.05) that runs only when asked. */
 export function JobMatches({ jobId, jobContentKey, ready }: JobMatchesProps) {
   const [requested, setRequested] = useState(false)
   const matches = useJobMatches(jobId, jobContentKey, { enabled: requested && ready })
+  // The list appears only once the AI has finished; until then the progress panel shows.
+  const results = matches.isFetching ? undefined : matches.data
 
   return (
     <section aria-labelledby="matches-heading" className="grid gap-4">
@@ -32,20 +34,21 @@ export function JobMatches({ jobId, jobContentKey, ready }: JobMatchesProps) {
       </div>
       <p className="text-sm text-fg-muted">
         {ready
-          ? 'Ranked by AI against this job: skills and location first, then skill strength, pay and experience. Perfect matches meet the job’s minimum years, must-have skills and location.'
+          ? 'Ranked by AI against this job: skills first, with location unless the job is remote, then experience. Perfect matches meet the job’s minimum years, must-have skills, location and budget (the top of its pay range).'
           : 'Available once this job’s embedding is ready.'}
       </p>
       {requested && matches.isFetching && <SearchProgress stages={matches.stages} label="Matching progress" />}
-      {!requested || matches.isPending ? null : matches.isError ? (
+      {!requested ? null : matches.isError ? (
         <Alert>{matches.error.message || 'Matching failed. Please try again.'}</Alert>
-      ) : matches.data.items.length + matches.data.filtered_out.length === 0 ? (
+      ) : !results ? null : results.items.length + results.filtered_out.length === 0 ? (
         <p className="text-fg-muted">No candidates found for this job yet.</p>
       ) : (
         <>
-          {matches.data.ranked_by === 'search' && (
-            <p className="text-sm text-fg-muted">AI ranking unavailable, so these are in search order.</p>
-          )}
-          <MatchResults result={matches.data} filtered fetching={matches.isFetching} />
+          <p className="num text-sm text-fg-muted">
+            Checked {results.checked} profiles, {results.items.length} meet every requirement
+            {results.ranked_by === 'search' && '. AI ranking unavailable, so these are in search order'}
+          </p>
+          <MatchResults result={results} filtered />
         </>
       )}
     </section>

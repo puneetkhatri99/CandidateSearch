@@ -2,7 +2,8 @@ import { Link, useNavigate } from 'react-router'
 import { Button, Stamp } from '@/shared/ui'
 import { useCurrentUser, useLogout } from '../hooks'
 
-/** `stacked` lays the name, role and sign-out out for the sidebar; the default is one inline row. */
+/** `stacked` lays the name, role and sign-out out for the sidebar; the default is one inline row.
+ * Change password lives on the Settings page. */
 export function UserMenu({ stacked = false }: { stacked?: boolean }) {
   const navigate = useNavigate()
   const { data: user } = useCurrentUser()
@@ -22,9 +23,6 @@ export function UserMenu({ stacked = false }: { stacked?: boolean }) {
         <span className="truncate text-fg">{user.full_name}</span>
         <Stamp tone="brass">{user.role}</Stamp>
       </span>
-      <Link to="/account/password" className="rounded-xs font-medium text-accent-fg underline-offset-4 hover:underline">
-        Change password
-      </Link>
       <Button
         variant="secondary"
         size="sm"

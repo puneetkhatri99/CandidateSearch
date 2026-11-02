@@ -33,5 +33,6 @@ export const validFormValues = (overrides: Partial<CandidateFormValues> = {}): C
   salary_currency: 'INR',
   consent: true,
   website: '',
+  resume_ref: '',
   ...overrides,
 })

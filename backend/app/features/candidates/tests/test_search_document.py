@@ -34,6 +34,15 @@ def test_document_excludes_direct_identifiers() -> None:
     assert "2019-2023" in doc
 
 
+def test_document_states_the_location_so_a_place_in_a_search_can_match_it() -> None:
+    doc = _document(city="New Delhi", country_code="IN", open_to_relocation=None)
+    assert "Location: New Delhi, India.\n" in doc
+
+    assert "Location: New Delhi, India. Open to relocation." in _document(
+        city="New Delhi", country_code="IN", open_to_relocation=True
+    )
+
+
 def test_whole_years_have_no_trailing_decimal() -> None:
     assert "5 years experience." in _document(years_experience=5)
 

@@ -3,11 +3,12 @@ from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import ColumnElement, Select, Text, cast, delete, func, select, tuple_
+from sqlalchemy import ColumnElement, Select, Text, cast, delete, func, or_, select, tuple_, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.features.candidates.models import Candidate
+from app.features.candidates.models import Candidate, CandidateBookmark
 from app.features.candidates.schemas import CandidateSearchParams
 from app.shared.aliases import city_spellings, skill_spellings
 from app.shared.validation import split_tags
@@ -26,6 +27,8 @@ def hard_filter_clauses(
     city: str | None = None,
     country: str | None = None,
     source: str | None = None,
+    max_salary: int | None = None,
+    salary_currency: str | None = None,
 ) -> list[ColumnElement[bool]]:
     """The hard filters as SQL. semantic_search.failed_filters checks the same rules in
     Python; change both together."""
@@ -42,6 +45,16 @@ def hard_filter_clauses(
         clauses.append(Candidate.country_code == country)
     if source:
         clauses.append(Candidate.source == source)
+    if max_salary is not None and salary_currency:
+        # Only a stated salary in the same currency can be over budget (user decision: no
+        # salary counts as within; another currency can't be compared without exchange rates).
+        clauses.append(
+            or_(
+                Candidate.expected_salary.is_(None),
+                Candidate.salary_currency != salary_currency,
+                Candidate.expected_salary <= max_salary,
+            )
+        )
     return clauses
 
 
@@ -52,10 +65,18 @@ def ids_passing(
     city: str | None,
     country: str | None,
     source: str | None,
+    max_salary: int | None = None,
+    salary_currency: str | None = None,
 ) -> Select[uuid.UUID]:
     """Ids of candidates meeting every hard filter, as a subquery for other searches."""
     clauses = hard_filter_clauses(
-        min_years=min_years, skills=skills, city=city, country=country, source=source
+        min_years=min_years,
+        skills=skills,
+        city=city,
+        country=country,
+        source=source,
+        max_salary=max_salary,
+        salary_currency=salary_currency,
     )
     return select(Candidate.id).where(*clauses)
 
@@ -103,6 +124,28 @@ async def get_candidates_by_ids(
     return list(await session.scalars(select(Candidate).where(Candidate.id.in_(candidate_ids))))
 
 
+async def list_candidates_with_children(session: AsyncSession) -> list[Candidate]:
+    """Locks the rows until the caller commits, so an edit saved meanwhile waits instead of
+    being overwritten by a document built from the old profile."""
+    statement = (
+        select(Candidate)
+        .options(selectinload(Candidate.experiences), selectinload(Candidate.educations))
+        .with_for_update(of=Candidate)
+    )
+    return list(await session.scalars(statement))
+
+
+async def set_search_document(
+    session: AsyncSession, candidate_id: uuid.UUID, document: str
+) -> None:
+    """Not an edit of the profile, so `version` and `updated_at` stay as they are."""
+    await session.execute(
+        update(Candidate)
+        .where(Candidate.id == candidate_id)
+        .values(search_document=document, updated_at=Candidate.updated_at)
+    )
+
+
 async def full_text_candidate_ids(
     session: AsyncSession,
     query: str,
@@ -127,6 +170,56 @@ async def full_text_candidate_ids(
     if within is not None:
         statement = statement.where(Candidate.id.in_(within))
     return list(await session.scalars(statement))
+
+
+async def get_candidate_row(session: AsyncSession, candidate_id: uuid.UUID) -> Candidate | None:
+    """The candidate without its child rows."""
+    return await session.get(Candidate, candidate_id)
+
+
+async def set_resume_ref(
+    session: AsyncSession, candidate_id: uuid.UUID, resume_ref: uuid.UUID
+) -> bool:
+    # A plain UPDATE: attaching a file isn't a profile edit, so `version` stays and an editor
+    # with the profile open can still save.
+    result = await session.execute(
+        update(Candidate)
+        .where(Candidate.id == candidate_id)
+        .values(resume_ref=resume_ref)
+        .returning(Candidate.id)
+        .execution_options(synchronize_session=False)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def add_bookmark(session: AsyncSession, candidate_id: uuid.UUID, added_by: uuid.UUID) -> bool:
+    """True when a new bookmark was made; starring an already-starred candidate keeps the first
+    adder."""
+    result = await session.execute(
+        insert(CandidateBookmark)
+        .values(id=uuid.uuid4(), candidate_id=candidate_id, added_by=added_by)
+        .on_conflict_do_nothing(index_elements=[CandidateBookmark.candidate_id])
+        .returning(CandidateBookmark.id)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def remove_bookmark(session: AsyncSession, candidate_id: uuid.UUID) -> bool:
+    result = await session.execute(
+        delete(CandidateBookmark)
+        .where(CandidateBookmark.candidate_id == candidate_id)
+        .returning(CandidateBookmark.id)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def list_bookmarks(session: AsyncSession) -> list[tuple[CandidateBookmark, Candidate]]:
+    rows = await session.execute(
+        select(CandidateBookmark, Candidate)
+        .join(Candidate, Candidate.id == CandidateBookmark.candidate_id)
+        .order_by(CandidateBookmark.created_at.desc(), CandidateBookmark.id.desc())
+    )
+    return [(bookmark, candidate) for bookmark, candidate in rows]
 
 
 async def delete_candidate(session: AsyncSession, candidate_id: uuid.UUID) -> bool:

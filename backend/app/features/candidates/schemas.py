@@ -237,6 +237,8 @@ class CandidateCreate(CandidateProfile):
     """Public intake form submission."""
 
     consent: StrictBool
+    # From POST /resumes when the candidate uploaded a resume while filling in the form.
+    resume_ref: UUID | None = None
     # Honeypot: hidden in the UI, so only bots fill it in.
     website: str | None = Field(default=None, max_length=500)
 
@@ -254,6 +256,7 @@ class StaffCandidateCreate(CandidateProfile):
     """Candidate added by staff, who attest that the candidate agreed to the privacy notice."""
 
     consent_confirmed: StrictBool
+    resume_ref: UUID | None = None
 
     @field_validator("consent_confirmed")
     @classmethod
@@ -321,6 +324,16 @@ class CandidatePage(BaseModel):
     next_cursor: str | None
 
 
+class Bookmark(BaseModel):
+    candidate: CandidateSummary
+    added_by_name: str
+    added_at: datetime
+
+
+class BookmarkList(BaseModel):
+    items: list[Bookmark]
+
+
 class ExperienceOut(BaseModel):
     company: str
     title: str
@@ -364,5 +377,6 @@ class CandidateDetail(BaseModel):
     source: str
     consent_given_at: datetime
     consent_version: str
+    has_resume: bool
     created_at: datetime
     updated_at: datetime

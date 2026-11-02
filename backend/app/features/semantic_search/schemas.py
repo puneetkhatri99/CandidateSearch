@@ -1,15 +1,31 @@
+import uuid
+from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    ValidationInfo,
+    field_validator,
+)
 
 from app.features.candidates import CandidateSummary
-from app.shared.validation import normalize_country
+from app.shared.validation import (
+    MAX_SALARY,
+    BlankToNone,
+    Currency,
+    normalize_country,
+    salary_needs_currency,
+)
 
 MAX_QUERY_LENGTH = 500
-MAX_RESULTS = 20  # the service ranks only the 20 best hybrid-search hits
+MAX_RESULTS = 25  # the best of the larger shortlist the LLM ranks (service.POOL_SIZE)
 
-FilterName = Literal["min_years", "skill", "city", "country", "source"]
+FilterName = Literal["min_years", "skill", "city", "country", "source", "max_salary"]
 
 
 def _clean(value: object) -> object:
@@ -31,16 +47,29 @@ class HardFilters(BaseModel):
     city: str | None = Field(default=None, max_length=100)
     country: Annotated[str, AfterValidator(normalize_country)] | None = None
     source: str | None = Field(default=None, max_length=30)
+    # The budget: a yearly amount in whole units of salary_currency (user decision 2026-11-02:
+    # over budget goes to "Filtered out"). Not strict, since query strings arrive as text.
+    max_salary: int | None = Field(default=None, ge=1, le=MAX_SALARY)
+    salary_currency: Annotated[Currency | None, BlankToNone] = Field(
+        default=None, validate_default=True
+    )
 
     @field_validator("skill", "city", "source", mode="before")
     @classmethod
     def _clean_text(cls, value: object) -> object:
         return _clean(value)
 
+    @field_validator("salary_currency")
+    @classmethod
+    def _currency_with_budget(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if "max_salary" not in info.data:
+            return value  # the amount itself failed; one error for one mistake
+        return salary_needs_currency(info.data["max_salary"] is not None, value)
+
 
 class SemanticSearchParams(HardFilters):
     q: str = Field(min_length=2, max_length=MAX_QUERY_LENGTH)
-    limit: int = Field(default=20, ge=1, le=MAX_RESULTS)
+    limit: int = Field(default=MAX_RESULTS, ge=1, le=MAX_RESULTS)
 
     @field_validator("q", mode="before")
     @classmethod
@@ -72,13 +101,17 @@ Stage = Literal["embedding", "retrieval", "augmentation", "ranking", "filtering"
 
 
 class StageEvent(BaseModel):
-    """One step of a search, streamed so the UI can show what is happening. Never carries the
-    query text or anything about a candidate beyond counts."""
+    """One step of a search, streamed so the UI can show what is happening. Carries counts, and
+    at most the place and years read from the search, shown back to the person who typed it.
+    Never the query text itself, nothing about a candidate, and never logged."""
 
     stage: Stage
-    state: Literal["started", "done"]
+    state: Literal["started", "progress", "done"]
     detail: str | None = None
     elapsed_ms: int | None = None  # set on "done"
+    # Set on "progress": how many of `total` profiles the AI has judged so far.
+    completed: int | None = None
+    total: int | None = None
 
 
 class SemanticSearchResult(BaseModel):
@@ -86,9 +119,44 @@ class SemanticSearchResult(BaseModel):
     # hits, in the same order, so a strong candidate a filter removed is still visible.
     items: list[SemanticMatch]
     filtered_out: list[SemanticMatch]
+    # How many profiles the search fetched and ranked, before the top `limit` were kept.
+    checked: int
     # "ai": ranked by the LLM; "search": the LLM was unavailable, so hybrid-search order.
     ranked_by: Literal["ai", "search"]
     # Models and prompt version behind this answer (RULES §8).
     embedding_model: str
     ranking_model: str | None
     prompt_version: str | None
+    # Set for a search by meaning: the saved copy the page reopens for free. None for job matches.
+    saved_search_id: uuid.UUID | None = None
+
+
+class SavedSearchSummary(BaseModel):
+    id: uuid.UUID
+    query: str
+    filters: dict[str, Any]  # Any: the filter values as sent (strings, numbers)
+    result_count: int
+    filtered_out_count: int
+    starred: bool
+    created_at: datetime
+
+
+class SavedSearchPage(BaseModel):
+    items: list[SavedSearchSummary]
+    next_cursor: str | None
+
+
+class SavedSearchDetail(BaseModel):
+    """A saved search reopened: its query and filters, and the result as it was shown."""
+
+    query: str
+    filters: dict[str, Any]  # Any: as in SavedSearchSummary
+    starred: bool
+    created_at: datetime
+    result: SemanticSearchResult
+
+
+class StarRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    starred: StrictBool

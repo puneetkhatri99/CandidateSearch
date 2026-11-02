@@ -17,9 +17,9 @@ LinkedIn forbids it and has sued over it. Candidates come from our own form and 
 **Where:** `candidates/repository.search_candidates`; migration `d2b7e4a1c9f6`. Bringing lookup back is a new decision.
 
 ### Salary is yearly, whole units, with one of 8 currencies
-**Decision (user):** salary is a yearly amount plus a currency, and the AI judges it.
+**Decision (user):** salary is a yearly amount plus a currency. ~~The AI judges it.~~ Since 2026-11-02 code checks it as a hard filter (over budget → "Filtered out"; no stated salary and another currency pass), and pay is no longer sent to OpenAI.
 **Why 8 currencies:** the forms offer 8. Accepting more would store values the edit form can't show or save.
-**Where:** `shared/validation.YearlySalary`, `CURRENCY_CODES`, `ranking.judge_salary`.
+**Where:** `shared/validation.YearlySalary`, `CURRENCY_CODES`, `ranking.salary_criterion`, `candidates.repository.hard_filter_clauses`, `semantic_search.service.failed_filters`.
 
 ## Architecture
 
@@ -94,7 +94,7 @@ See [02-architecture.md](02-architecture.md). Everything about one capability is
 **Where:** `ai_usage/service.metered_call`, `core/ai_pricing.py`.
 
 ### Hybrid search: meaning + keywords
-**Why:** embeddings find "the right kind of profile" but are weak on exact words, numbers and places (the city isn't even in the embedded text). Full-text search catches those. Merging with RRF gets both.
+**Why:** embeddings find "the right kind of profile" but are weak on exact words and numbers. Full-text search catches those. Merging with RRF gets both.
 **Where:** `semantic_search/service._find_rank_and_filter`, `ranking.fuse`, `candidates/repository.full_text_candidate_ids`.
 
 ### Full-text search uses Postgres `tsvector`, not BM25
@@ -102,21 +102,31 @@ See [02-architecture.md](02-architecture.md). Everything about one capability is
 **Where:** `candidates/models.SEARCH_TSV_EXPRESSION` (includes the city), `repository.full_text_candidate_ids` (words OR-ed so partial matches still rank).
 
 ### The LLM judges, code orders
-**Decision (user):** skills and location first, then skills score, then pay, then experience.
-**Why:** the same judgements always give the same order, and plain rules (work-mode compatibility, "relocation must be stated") aren't left to the model.
-**Where:** `ranking.to_match`, `rank_by_judgements`, `judge_location`, `judge_salary`, `fits_work_mode`.
+**Decision (user, 2026-11-02):** skills first, with location beside them unless the role is remote; then skills band, experience band, for remote roles the wanted country, and finally actual years (more first, fewer for a junior search). Budget is a hard filter, not part of the order.
+**Why:** the same judgements always give the same order, and plain rules (work-mode compatibility, "relocation must be stated", money comparisons) aren't left to the model.
+**Why bands (20 points wide):** the model's scores wobble by a few points. Sorting on the exact score let a 92 with 5 years beat an 85 with 15 years, so experience almost never counted.
+**Where:** `ranking.to_match`, `rank_by_judgements`, `judge_location`, `salary_criterion`, `fits_work_mode`.
 
 ### "Does the search name a place / state pay?" is asked once per search
 **Why:** inferring it from any one candidate's verdict let one odd answer change the scoring for all 20.
-**Where:** `RankingAnswer.search_names_place`, `search_states_pay`; prompt `rank_v3.md`.
+**Where:** `RankingAnswer.search_names_place`, `search_states_pay`, `search_wants_junior`; prompt `rank_v6.md`.
 
-### 20 profiles go to the LLM
-**Decision (user):** the shortlist is 20 (plus up to 10 filtered-out when filters are set). About $0.01-0.02 per search.
-**Where:** `POOL_SIZE`, `FILTERED_OUT_SIZE` in `semantic_search/service.py`.
+### 100 profiles go to the LLM
+**Decision (user):** the shortlist is 100 (plus up to 10 filtered-out when filters are set), and the best 25 are shown. No place names are hardcoded: a typed place reaches the shortlist because each profile's embedded text states its location, and because `understanding.py` reads it from the search text.
+**Costs:** about $0.05 and 25 seconds per new search; see LEARNINGS for measured numbers.
+**Needed with it:** `hnsw.ef_search` is raised to match, or the index returns at most 40; the LLM timeout and output limit are raised too.
+**Where:** `POOL_SIZE`, `FILTERED_OUT_SIZE` in `semantic_search/service.py`; `embeddings/repository.nearest_neighbours`.
+
+### The list appears only after the AI has finished
+**Decision (user):** a run shows only its progress steps, then the final list. Results from an earlier search are hidden too. An earlier version showed unranked profiles first and slid them into order; it was removed.
+**Where:** `results = query.isFetching ? undefined : query.data` in `CandidateSearchPage` and `JobMatches`.
+
+### Changing the embedded text
+A candidate's document is stored, so a format change only applies to old rows after `python -m app.cli rebuild-search-documents`, then `embed-backfill`. The rebuild doesn't change `version` or `updated_at`, because the profile itself didn't change.
 
 ### Hard filters split the ranked list instead of removing people
 **Decision (user):** show perfect matches and, separately, strong candidates a filter removed.
-**Why fetch twice:** filtering only after a top-20 fetch could leave few perfect matches when matching people exist lower down. So with filters, fetch the best 20 among people who pass, plus the best 10 of everyone else.
+**Why fetch twice:** filtering only after the fetch could leave few perfect matches when matching people exist lower down. So with filters, fetch the best 100 among people who pass, plus the best 10 of everyone else.
 **Where:** `_find_rank_and_filter`, `candidates.candidate_ids_passing`, `failed_filters`.
 
 ### The SQL filter and the Python filter must agree

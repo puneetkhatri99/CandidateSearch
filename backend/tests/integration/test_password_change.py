@@ -22,6 +22,8 @@ FLAGGED_EMAIL = "flagged@example.com"
 PUBLIC_OR_EXEMPT = {
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/candidates"),
+    # The public form reads resumes too; it needs no session.
+    ("POST", "/api/v1/resumes"),
     ("GET", "/api/v1/auth/me"),
     ("POST", "/api/v1/auth/logout"),
     ("POST", "/api/v1/auth/change-password"),

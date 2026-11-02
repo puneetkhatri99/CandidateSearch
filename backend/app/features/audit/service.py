@@ -20,6 +20,10 @@ AuditAction = Literal[
     "candidate.create",
     "candidate.update",
     "candidate.delete",
+    "candidate.bookmark",
+    "candidate.unbookmark",
+    "candidate.resume_attach",
+    "candidate.resume_view",
     "ai_budget.update",
 ]
 

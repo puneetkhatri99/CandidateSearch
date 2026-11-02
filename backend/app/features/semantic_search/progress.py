@@ -14,10 +14,23 @@ class Progress:
         self._listener = listener
         self._started: dict[Stage, float] = {}
 
+    @property
+    def listening(self) -> bool:
+        """Whether anyone sees the progress, so work done only to report it can be skipped."""
+        return self._listener is not None
+
     async def start(self, stage: Stage, detail: str) -> None:
         self._started[stage] = time.perf_counter()
         if self._listener is not None:
             await self._listener(StageEvent(stage=stage, state="started", detail=detail))
+
+    async def count(self, stage: Stage, completed: int, total: int, detail: str) -> None:
+        if self._listener is not None:
+            await self._listener(
+                StageEvent(
+                    stage=stage, state="progress", detail=detail, completed=completed, total=total
+                )
+            )
 
     async def done(self, stage: Stage, detail: str) -> None:
         began = self._started.get(stage, time.perf_counter())
