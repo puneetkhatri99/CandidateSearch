@@ -11,16 +11,19 @@ import {
   searchCandidates,
   updateCandidate,
 } from './api'
-import { type CandidateDetail, FILTER_KEYS, type SearchFilters, type StageEvent } from './types'
+import { type CandidateDetail, FILTER_KEYS, type SearchFilters, type SemanticSearchResult, type StageEvent } from './types'
 
 /** Shorter queries carry too little meaning to embed (the API rejects them too). */
 export const MIN_QUERY_LENGTH = 2
 
+// AI results (search by meaning, job matches) sit outside the 'candidates' prefix: invalidating
+// candidate lists must never start a paid ranking by itself.
+const AI_RESULTS = [['candidate-meaning-search'], ['job-matches']] as const
+
 const keys = {
   search: (filters: SearchFilters) => ['candidates', 'search', filters] as const,
-  meaning: (filters: SearchFilters) => ['candidates', 'search', 'meaning', filters] as const,
-  // Not under the search prefix: invalidating searches must not start a paid ranking by itself.
-  jobMatches: (jobId: string, jobContentKey: string) => ['job-matches', jobId, jobContentKey] as const,
+  meaning: (filters: SearchFilters) => [...AI_RESULTS[0], filters] as const,
+  jobMatches: (jobId: string, jobContentKey: string) => [...AI_RESULTS[1], jobId, jobContentKey] as const,
   allSearches: ['candidates', 'search'] as const,
   detail: (id: string) => ['candidates', 'detail', id] as const,
 }
@@ -137,6 +140,14 @@ export function useDeleteCandidate() {
     onSuccess: (_, id) => {
       queryClient.removeQueries({ queryKey: keys.detail(id) })
       void queryClient.invalidateQueries({ queryKey: keys.allSearches })
+      // Drop the person from AI results in place: re-running would pay for a new ranking.
+      const without = (result: SemanticSearchResult | undefined) =>
+        result && {
+          ...result,
+          items: result.items.filter((match) => match.candidate.id !== id),
+          filtered_out: result.filtered_out.filter((match) => match.candidate.id !== id),
+        }
+      for (const queryKey of AI_RESULTS) queryClient.setQueriesData({ queryKey }, without)
     },
   })
 }

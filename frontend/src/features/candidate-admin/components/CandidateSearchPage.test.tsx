@@ -143,6 +143,24 @@ describe('CandidateSearchPage', () => {
     ),
   })
 
+  it('removes a deleted person from the AI results without paying for a new search', async () => {
+    const ravi = candidateSummary({ id: 'c-2', full_name: 'Ravi Kumar' })
+    const match = (candidate: typeof ravi) => ({ candidate, fit: 'strong', criteria: [], failed_filters: [] })
+    const fetchMock = stubApi(
+      me('admin'),
+      route('DELETE', '/api/v1/admin/candidates/c-1', { status: 204 }),
+      route('GET', meaningUrl, { ...result({ items: [match(candidateSummary()), match(ravi)] }) }),
+    )
+    const user = renderPage('/admin/candidates?q=payments+backend+engineer')
+
+    await user.click(await screen.findByRole('button', { name: 'Delete Asha Verma' }))
+    await user.click(screen.getByRole('button', { name: 'Delete permanently' }))
+
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Asha Verma' })).not.toBeInTheDocument())
+    expect(screen.getByRole('link', { name: 'Ravi Kumar' }).closest('li')).toHaveTextContent(/^1/)
+    expect(meaningCalls(fetchMock)).toHaveLength(1)
+  })
+
   it('searches from a link and shows the fit with its reasons', async () => {
     const fetchMock = stubApi(
       route('GET', meaningUrl, {

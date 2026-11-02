@@ -10,6 +10,7 @@ import httpx2
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import delete, select, text, update
+from sqlalchemy.exc import DBAPIError
 
 from app.core.db import get_sessionmaker
 from app.core.embeddings import get_embedding_provider
@@ -24,6 +25,7 @@ from app.features.candidates import (
     get_rankable_candidates,
     rebuild_search_documents,
 )
+from app.features.candidates import repository as candidates_repository
 from app.features.candidates.models import Candidate
 from app.features.candidates.tests.factories import valid_candidate_payload
 from app.features.embeddings import CANDIDATES, JOBS, embed_stale
@@ -91,6 +93,7 @@ class ChatMock:
             answer = {
                 "search_names_place": any(j["location"] != "not_required" for j in judgements),
                 "search_states_pay": any(j["salary"] != "not_required" for j in judgements),
+                "search_wants_junior": False,
                 "judgements": judgements,
             }
         else:
@@ -204,7 +207,7 @@ async def test_the_llm_judgements_decide_the_order(
     assert (body["ranked_by"], body["ranking_model"], body["prompt_version"]) == (
         "ai",
         "gpt-5.4-mini",
-        "rank_v4",
+        "rank_v5",
     )
     first = body["items"][0]
     assert first["candidate"]["id"] == str(ids[2])
@@ -850,6 +853,22 @@ async def test_rebuilding_documents_updates_old_ones_without_touching_the_profil
     async with get_sessionmaker()() as session:
         outcome = await embed_stale(session, get_embedding_provider(), CANDIDATES)
     assert outcome.embedded == 1
+
+
+async def test_rebuilding_documents_locks_the_profiles_it_reads() -> None:
+    """An edit saved while the rebuild runs must wait, not be overwritten by old text."""
+    [candidate_id] = await _seed_embedded(1)
+    async with get_sessionmaker()() as reader, reader.begin():
+        await candidates_repository.list_candidates_with_children(reader)
+        async with get_sessionmaker()() as writer:
+            await writer.execute(text("SET lock_timeout = '200ms'"))
+            with pytest.raises(DBAPIError, match="lock timeout"):
+                await writer.execute(
+                    update(Candidate)
+                    .where(Candidate.id == candidate_id)
+                    .values(headline="Edited meanwhile")
+                )
+            await writer.rollback()
 
 
 async def _all_audits() -> list[AuditEvent]:

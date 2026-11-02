@@ -102,14 +102,14 @@ See [02-architecture.md](02-architecture.md). Everything about one capability is
 **Where:** `candidates/models.SEARCH_TSV_EXPRESSION` (includes the city), `repository.full_text_candidate_ids` (words OR-ed so partial matches still rank).
 
 ### The LLM judges, code orders
-**Decision (user):** skills and location first, then skills band, pay, experience band, and finally actual years.
+**Decision (user):** skills and location first, then skills band, pay, experience band, and finally actual years (more first, fewer for a junior search).
 **Why:** the same judgements always give the same order, and plain rules (work-mode compatibility, "relocation must be stated") aren't left to the model.
 **Why bands (20 points wide):** the model's scores wobble by a few points. Sorting on the exact score let a 92 with 5 years beat an 85 with 15 years, so experience almost never counted.
 **Where:** `ranking.to_match`, `rank_by_judgements`, `judge_location`, `judge_salary`, `fits_work_mode`.
 
 ### "Does the search name a place / state pay?" is asked once per search
 **Why:** inferring it from any one candidate's verdict let one odd answer change the scoring for all 20.
-**Where:** `RankingAnswer.search_names_place`, `search_states_pay`; prompt `rank_v4.md`.
+**Where:** `RankingAnswer.search_names_place`, `search_states_pay`, `search_wants_junior`; prompt `rank_v5.md`.
 
 ### 100 profiles go to the LLM
 **Decision (user):** the shortlist is 100 (plus up to 10 filtered-out when filters are set), and the best 25 are shown. No place names are hardcoded: a typed place reaches the shortlist because each profile's embedded text states its location, and because `understanding.py` reads it from the search text.

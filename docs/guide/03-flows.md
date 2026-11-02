@@ -230,7 +230,7 @@ semantic_search/service.py  search_by_meaning
 
 The LLM only **judges**. Our code **orders** (`ranking.to_match` and `rank_by_judgements`). That makes the order reproducible and keeps simple rules out of the model's hands.
 
-For each candidate the LLM returns: `skills_score` (0-100), a `location` verdict, `experience_score`, a `salary` verdict, and short notes. Once per search it also says `search_names_place` and `search_states_pay`.
+For each candidate the LLM returns: `skills_score` (0-100), a `location` verdict, `experience_score`, a `salary` verdict, and short notes. Once per search it also says `search_names_place`, `search_states_pay` and `search_wants_junior` (the role itself is junior or entry-level, not a senior role that mentors juniors).
 
 The sort key, highest first:
 
@@ -238,7 +238,7 @@ The sort key, highest first:
 2. skills score, in bands 20 points wide (a few points' difference is noise)
 3. salary points (only when the search or job states pay)
 4. experience score, in the same bands
-5. actual years of experience
+5. actual years of experience: more years first, or fewer when `search_wants_junior`
 
 Code-level guards on the LLM's answers:
 

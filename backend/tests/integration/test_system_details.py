@@ -60,7 +60,7 @@ async def test_counts_up_to_date_stale_and_failed_profiles(admin_client: AsyncCl
     assert body["models"] == {
         "embedding_model": "text-embedding-3-small",
         "ranking_model": "gpt-5.4-mini",
-        "ranking_prompt_version": "rank_v4",
+        "ranking_prompt_version": "rank_v5",
         "understanding_prompt_version": "understand_v1",
     }
     assert Decimal(body["budget"]["limit_usd"]) == Decimal("5.00")

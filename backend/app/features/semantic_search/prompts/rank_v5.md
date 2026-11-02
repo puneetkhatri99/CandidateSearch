@@ -4,6 +4,7 @@ First, about the search itself (the same answer for every candidate):
 
 - `search_names_place`: true if the search or job names a city, region or country where the work happens and is not a remote role; otherwise false.
 - `search_states_pay`: true if the search or job states a salary, pay range or budget; otherwise false.
+- `search_wants_junior`: true only if the role itself is junior, entry-level, a graduate role or an internship; otherwise false. A senior role that mentions mentoring or managing junior people is not junior.
 
 Then, in `judgements`, for each candidate return:
 

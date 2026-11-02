@@ -104,8 +104,12 @@ async def get_candidates_by_ids(
 
 
 async def list_candidates_with_children(session: AsyncSession) -> list[Candidate]:
-    statement = select(Candidate).options(
-        selectinload(Candidate.experiences), selectinload(Candidate.educations)
+    """Locks the rows until the caller commits, so an edit saved meanwhile waits instead of
+    being overwritten by a document built from the old profile."""
+    statement = (
+        select(Candidate)
+        .options(selectinload(Candidate.experiences), selectinload(Candidate.educations))
+        .with_for_update(of=Candidate)
     )
     return list(await session.scalars(statement))
 

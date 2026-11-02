@@ -48,9 +48,18 @@ def _candidate(
 
 
 def _answer(
-    *, judgements: list[CandidateJudgement], place: bool = True, pay: bool = False
+    *,
+    judgements: list[CandidateJudgement],
+    place: bool = True,
+    pay: bool = False,
+    junior: bool = False,
 ) -> RankingAnswer:
-    return RankingAnswer(search_names_place=place, search_states_pay=pay, judgements=judgements)
+    return RankingAnswer(
+        search_names_place=place,
+        search_states_pay=pay,
+        search_wants_junior=junior,
+        judgements=judgements,
+    )
 
 
 def _judgement(
@@ -147,6 +156,24 @@ def test_more_experienced_people_win_among_similar_skills() -> None:
     ranked = ranking.rank_by_judgements(answer, [junior, senior], None)
 
     assert [m.candidate.full_name for m in ranked] == ["Senior", "Junior"]
+
+
+def test_fewer_years_win_among_similar_skills_when_the_search_wants_juniors() -> None:
+    # "junior python developer": 3 years scored 82 and 1 year 90, the same band, and the years
+    # tie-break used to put the 3-year person first.
+    three_years = _candidate("ThreeYears", years=3)
+    one_year = _candidate("OneYear", years=1)
+    answer = _answer(
+        judgements=[
+            _judgement(1, 90, "same_city", 82),
+            _judgement(2, 90, "same_city", 90),
+        ],
+        junior=True,
+    )
+
+    ranked = ranking.rank_by_judgements(answer, [three_years, one_year], None)
+
+    assert [m.candidate.full_name for m in ranked] == ["OneYear", "ThreeYears"]
 
 
 def test_a_real_gap_in_skills_or_experience_still_beats_years() -> None:

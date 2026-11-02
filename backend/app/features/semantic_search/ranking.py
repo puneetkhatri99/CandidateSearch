@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app.features import candidates
 from app.features.semantic_search.schemas import Criterion, Fit, SemanticMatch
 
-PROMPT_VERSION = "rank_v4"
+PROMPT_VERSION = "rank_v5"
 INSTRUCTIONS = (Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md").read_text("utf-8")
 RANK_MODEL = "gpt-5.4-mini"
 # Room for up to 110 judgements (about 150 tokens each); caps a runaway answer at about $0.09
@@ -91,6 +91,9 @@ class RankingAnswer(BaseModel):
     # Asked once per search, so one odd per-candidate verdict can't decide it for everyone.
     search_names_place: bool
     search_states_pay: bool
+    # Flips the final years tie-break. Asked of the model because a word list can't tell a
+    # junior role from a senior one that "mentors junior engineers".
+    search_wants_junior: bool
     judgements: list[CandidateJudgement]
 
 
@@ -193,9 +196,11 @@ def to_match(
     required: WorkMode | None,
     place_named: bool = False,
     pay_named: bool = False,
+    wants_junior: bool = False,
 ) -> tuple[SortKey, SemanticMatch]:
     """The sort key (higher is better) and the match shown to the recruiter: skills and
-    location first, then the skills band, pay, the experience band, and finally actual years."""
+    location first, then the skills band, pay, the experience band, and finally actual years
+    (more years win, fewer for a junior search)."""
     skills = _clamp(judgement.skills_score)
     experience = _clamp(judgement.experience_score)
     skills_points = 1.0 if skills >= SKILLS_MET_SCORE else 0.0
@@ -219,7 +224,8 @@ def to_match(
         note = "No expected salary stated" if salary_verdict == "unknown" else judgement.salary_note
         criteria.append(Criterion(name="salary", status=_status(salary_points), note=note))
     match = SemanticMatch(candidate=candidate.summary, fit=fit, criteria=criteria)
-    key = (total, _band(skills), salary_points, _band(experience), candidate.years_experience)
+    years = -candidate.years_experience if wants_junior else candidate.years_experience
+    key = (total, _band(skills), salary_points, _band(experience), years)
     return key, match
 
 
@@ -243,7 +249,9 @@ def rank_by_judgements(
             )
             ranked.append(((-1.0, 0, 0.0, 0, 0.0), number, unjudged))
             continue
-        key, match = to_match(judgement, candidate, required, place_named, pay_named)
+        key, match = to_match(
+            judgement, candidate, required, place_named, pay_named, answer.search_wants_junior
+        )
         ranked.append((key, number, match))
     # Ties keep the hybrid-search order (lower number first).
     ranked.sort(key=lambda item: (tuple(-k for k in item[0]), item[1]))

@@ -350,7 +350,7 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 
 | Name | What it does |
 |---|---|
-| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v4.md`, loaded once. A prompt change gets a new file name. |
+| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v5.md`, loaded once. A prompt change gets a new file name. |
 | `RANK_MODEL` | `gpt-5.4-mini`. |
 | `required_work_mode(query)` | Finds "hybrid", "office/onsite/wfo" or "remote/wfh" in the search text. Hybrid wins if several appear. |
 | `fits_work_mode(candidate_modes, required)` | Office (2) ≥ hybrid (1) ≥ remote (0): a candidate fits if they accept at least as much office time as the role needs. |
