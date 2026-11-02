@@ -34,8 +34,9 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5180"]
     max_request_body_bytes: int = 64 * 1024
-    # Resume uploads only (paths in RESUME_UPLOAD_PATHS); ResumeAI's own limit is 10 MB.
-    max_resume_bytes: int = 10 * 1024 * 1024
+    # Resume uploads only (paths in RESUME_UPLOAD_PATHS). 4 MiB: Vercel refuses request bodies
+    # over 4.5 MB before they reach the app (ResumeAI itself takes up to 10 MB).
+    max_resume_bytes: int = 4 * 1024 * 1024
 
     # ResumeAI reads resumes and renders the formatted PDF. Without a key, uploads and
     # "See resume" answer 503; everything else works.
@@ -46,6 +47,14 @@ class Settings(BaseSettings):
     # Per IP on the public form; ResumeAI allows 30 reads an hour from our server in total.
     resume_upload_limit: int = 10
     resume_upload_window_seconds: int = 3600
+
+    # S3-compatible storage for the formatted resume PDFs (Neon object storage injects the AWS_*
+    # names). Without a bucket and keys, "See resume" asks ResumeAI every time.
+    resume_bucket: str | None = None
+    aws_endpoint_url_s3: str | None = None
+    aws_region: str = "us-east-2"
+    aws_access_key_id: SecretStr | None = None
+    aws_secret_access_key: SecretStr | None = None
 
     # Version of the privacy notice candidates consent to; bump when the notice text changes.
     privacy_notice_version: str = "2026-10-draft"
@@ -80,6 +89,11 @@ class Settings(BaseSettings):
     # Background tasks (embedding, pruning) inside the API. Turn off to run
     # `python -m app.cli maintenance` separately.
     maintenance_in_api: bool = True
+    # Serverless hosts (Vercel) keep no background loop: there, MAINTENANCE_IN_API=false and
+    # EMBED_ON_SAVE=true make each candidate or job save embed what it changed before answering.
+    embed_on_save: bool = False
+    # Vercel Cron calls the maintenance route with "Authorization: Bearer <CRON_SECRET>".
+    cron_secret: SecretStr | None = None
 
     @model_validator(mode="after")
     def _require_real_secrets_outside_development(self) -> "Settings":

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
@@ -30,7 +31,7 @@ from app.features.candidates.models import Candidate
 from app.features.candidates.tests.factories import valid_candidate_payload
 from app.features.embeddings import CANDIDATES, JOBS, embed_stale
 from app.features.embeddings.repository import nearest_neighbours
-from app.features.semantic_search import ranking, service, understanding
+from app.features.semantic_search import evaluation, ranking, service, understanding
 from app.features.semantic_search.schemas import HardFilters
 from app.shared.validation import split_tags
 from tests.integration.conftest import FETCH_HEADERS, create_job
@@ -1107,3 +1108,46 @@ def test_looks_personal() -> None:
     assert not service.looks_personal("python developer budget 2500000 INR")
     assert not service.looks_personal("python engineer with 10 years in 2024")
     assert not service.looks_personal("react 18, node 20, 5+ years")
+
+
+async def test_eval_grades_only_synthetic_profiles_and_scores_the_real_ranking(
+    chat_mock: ChatMock,
+) -> None:
+    ids = await _seed_embedded(3)
+    async with get_sessionmaker()() as session, session.begin():
+        # The golden set is committed to git: only seed profiles may be named in it.
+        await session.execute(
+            update(Candidate).where(Candidate.id.in_(ids[1:])).values(source="synthetic")
+        )
+
+    async with get_sessionmaker()() as session:
+        case = await evaluation.new_case(session, "case-1", QUERY, 10, random.Random(1))
+    assert sorted(c.email for c in case.candidates) == [
+        "semantic1@example.com",
+        "semantic2@example.com",
+    ]
+    assert not case.graded
+    # Labelling makes no ranking call: grades must not echo the AI under test.
+    assert chat_mock.payloads == [] and chat_mock.understanding_payloads == []
+
+    for c in case.candidates:
+        c.grade = 3 if c.email == "semantic2@example.com" else 0
+
+    def judge(profile: dict[str, Any]) -> dict[str, Any]:
+        fits = "Specialist number 2" in profile["profile"]
+        return {**_judge_everyone_the_same(profile), "skills_score": 90 if fits else 30}
+
+    chat_mock.judge = judge
+    ungraded = evaluation.GoldenCase(id="case-2", query=QUERY, candidates=[])
+    async with get_sessionmaker()() as session:
+        report = await evaluation.run_eval(session, evaluation.GoldenSet(cases=[case, ungraded]))
+
+    [score] = report.cases
+    assert (score.ranked_by, score.ndcg_at_10, score.precision_at_5) == ("ai", 1.0, 0.2)
+    assert score.top_10[0] == "semantic2@example.com"
+    # semantic0 was never graded (not synthetic) but is in the results.
+    assert score.unjudged_in_top_10 == 1
+    assert report.skipped_ungraded == ["case-2"]
+    assert report.ranking_prompt_version == ranking.PROMPT_VERSION
+    # Running an eval writes no audit row and saves no search: it isn't a person searching.
+    assert await _search_audits() == []

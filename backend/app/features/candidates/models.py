@@ -73,6 +73,9 @@ class Candidate(TimestampedModel):
 
     # The pair ResumeAI stores this person's resume data under (see features/resumes).
     resume_ref: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # Object-storage key of the stored formatted PDF; cleared (and the file deleted) whenever
+    # the resume or the profile changes, so the next view fetches a fresh one (user decision).
+    resume_pdf_key: Mapped[str | None] = mapped_column(String(300))
 
     # Optimistic locking: SQLAlchemy adds "WHERE version = :loaded" to every UPDATE.
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))

@@ -4,6 +4,8 @@
     python -m app.cli rebuild-search-documents
     python -m app.cli embed-backfill
     python -m app.cli maintenance [--once]
+    python -m app.cli eval-label --id backend-python-pune --query "python backend developer in pune"
+    python -m app.cli eval-search
 
 The password is read with getpass (never echoed, never in shell history), or from stdin
 with --password-stdin for automation.
@@ -12,7 +14,9 @@ with --password-stdin for automation.
 import argparse
 import asyncio
 import getpass
+import random
 import sys
+from pathlib import Path
 
 import structlog
 
@@ -29,6 +33,14 @@ from app.core.maintenance import run_maintenance
 from app.features.auth import Role, create_user
 from app.features.candidates import rebuild_search_documents
 from app.features.embeddings import TARGETS, embed_stale
+from app.features.semantic_search import (
+    EvalReport,
+    GoldenCase,
+    GoldenSet,
+    new_case,
+    report_markdown,
+    run_eval,
+)
 from app.maintenance import maintenance_tasks
 
 logger = structlog.get_logger("cli")
@@ -103,6 +115,67 @@ async def _maintenance(once: bool) -> None:
         await get_engine().dispose()
 
 
+async def _new_eval_case(case_id: str, query: str, count: int) -> GoldenCase:
+    try:
+        async with get_sessionmaker()() as session:
+            # Not security-sensitive: only the order the grader reads the profiles in.
+            return await new_case(session, case_id, query, count, random.Random())  # noqa: S311
+    finally:
+        await close_embedding_provider()
+        await get_engine().dispose()
+
+
+async def _run_eval(golden: GoldenSet) -> EvalReport:
+    try:
+        async with get_sessionmaker()() as session:
+            return await run_eval(session, golden)
+    finally:
+        await close_embedding_provider()
+        await get_engine().dispose()
+
+
+def _eval_label(golden_path: Path, case_id: str, query: str, count: int) -> None:
+    """Add a search to the golden set with ungraded candidates for a person to grade."""
+    golden = _load_golden(golden_path)
+    if any(case.id == case_id for case in golden.cases):
+        raise SystemExit(f"A case with id {case_id!r} already exists in {golden_path}.")
+    case = asyncio.run(_new_eval_case(case_id, query, count))
+    golden.cases.append(case)
+    _save_golden(golden_path, golden)
+    logger.info("eval_case_added", case=case_id, candidates=len(case.candidates))
+
+
+def _eval_search(golden_path: Path, results_dir: Path) -> None:
+    report = asyncio.run(_run_eval(_load_golden(golden_path)))
+    results_dir.mkdir(parents=True, exist_ok=True)
+    stem = f"{report.run_at:%Y-%m-%d_%H%M}-{report.ranking_prompt_version}"
+    (results_dir / f"{stem}.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    (results_dir / f"{stem}.md").write_text(report_markdown(report), encoding="utf-8")
+    logger.info(
+        "eval_completed",
+        cases=len(report.cases),
+        skipped_ungraded=len(report.skipped_ungraded),
+        mean_ndcg_at_10=report.mean_ndcg_at_10,
+        mean_precision_at_5=report.mean_precision_at_5,
+        fairness_flags=sum(g.flagged for g in report.fairness),
+        report=str(results_dir / f"{stem}.md"),
+    )
+
+
+def _load_golden(path: Path) -> GoldenSet:
+    return (
+        GoldenSet.model_validate_json(path.read_text(encoding="utf-8"))
+        if path.exists()
+        else GoldenSet()
+    )
+
+
+def _save_golden(path: Path, golden: GoldenSet) -> None:
+    # Full dump, so every ungraded candidate shows "grade": null for the grader to fill in.
+    text = golden.model_dump_json(indent=2)
+    path.write_text(text + "\n", encoding="utf-8")
+
+
 def _run_maintenance_command(once: bool) -> None:
     try:
         asyncio.run(_maintenance(once))
@@ -133,6 +206,18 @@ def main() -> None:
         "maintenance", help="run the background tasks: embed stale documents, prune old rows"
     )
     maintenance.add_argument("--once", action="store_true", help="run every task once, then exit")
+    label = commands.add_parser(
+        "eval-label", help="add a search to the golden set, with candidates to grade by hand"
+    )
+    label.add_argument("--id", required=True, help="short unique name, e.g. backend-python-pune")
+    label.add_argument("--query", required=True)
+    label.add_argument("--count", type=int, default=20, help="profiles to grade (default 20)")
+    label.add_argument("--golden", type=Path, default=Path("evals/golden_set.json"))
+    run_eval_command = commands.add_parser(
+        "eval-search", help="score search against the graded golden set (about $0.05 a case)"
+    )
+    run_eval_command.add_argument("--golden", type=Path, default=Path("evals/golden_set.json"))
+    run_eval_command.add_argument("--results", type=Path, default=Path("evals/results"))
     create = commands.add_parser("create-admin", help="create a staff user (admin by default)")
     create.add_argument("--email", required=True)
     create.add_argument("--name", required=True)
@@ -150,6 +235,12 @@ def main() -> None:
         return
     if args.command == "maintenance":
         _run_maintenance_command(args.once)
+        return
+    if args.command == "eval-label":
+        _eval_label(args.golden, args.id, args.query, args.count)
+        return
+    if args.command == "eval-search":
+        _eval_search(args.golden, args.results)
         return
     password = _read_password(args.password_stdin)
     asyncio.run(_create_user(args.email, args.name, password, args.role))

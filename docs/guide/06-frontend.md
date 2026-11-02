@@ -167,4 +167,8 @@ The last two come from `GET /api/v1/admin/system` through `useSystemDetails`, al
 - Component tests use `stubApi(route(...))` from `src/test/fakeApi.ts` to fake backend responses, including SSE streams with `sseBody(...)`. No real network.
 - Playwright e2e tests (`frontend/e2e/`) start their **own** API on port 8011 against the test database and Vite on 5181, so they don't touch your dev data. They use a placeholder OpenAI key, so search answers 503 there; e2e specs find seeded candidates with filters instead.
 
+## Deploying (Vercel, one app)
+
+The frontend and the API deploy together to Vercel: `scripts/deploy-vercel.ps1` builds the frontend, copies `dist/` into `backend/frontend_dist`, and deploys `backend/` (the Vercel project root). FastAPI serves those files with `app.frontend("/", fallback="index.html")` and Vercel moves them to its CDN (`[tool.vercel.fastapi.static] cdn = true`), so the browser talks to one domain and `BASE_URL` stays empty. Locally `backend/frontend_dist` doesn't exist and Vite serves the frontend as before. Resume uploads are capped at 4 MB (`MAX_RESUME_BYTES` here and in the API) because Vercel refuses request bodies over 4.5 MB.
+
 Next: [07-coding-style.md](07-coding-style.md).

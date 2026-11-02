@@ -345,12 +345,30 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 | `_rank_with_llm(session, query, pool, required, progress, budget, home_country)` | Builds the prompt, uses the 10-minute cache if possible, otherwise one metered `gpt-5.4-mini` call; returns ranked matches, or `None` if the AI is unavailable. Empty pool → no call. |
 | `_profiles(count)` | "1 profile" / "5 profiles" for progress messages. |
 | `_embed_query(session, provider, query)` | One metered embedding of the query with a 10 s timeout. Failure → 503. |
-| `search_by_meaning(session, params, actor, progress)` | The search entry point: refuse personal-looking queries, embed, `understand_query`, `_find_rank_and_filter`, audit. |
+| `find_matches(session, params, progress)` | The search itself: refuse personal-looking queries, embed, `understand_query`, `_find_rank_and_filter`. Returns the result and the understood facts. No audit, no saved search; the evaluation calls it directly. |
+| `search_by_meaning(session, params, actor, progress)` | The API entry point: `find_matches`, then the `candidate.search` audit row and the searcher's saved copy. |
+| `_hybrid_ids(session, vector, model, keyword_text, within)` | One hybrid fetch: nearest vectors + full text, fused (reciprocal rank fusion), `POOL_SIZE` ids. |
+| `label_pool(session, query, count)` | The best `count` hybrid matches **without** the AI ranking, for a person to grade (one query embedding, about $0.000001). |
 | `_JOB_WORK_MODES` | Maps job `onsite` to the ranking's `office`. |
 | `job_filters(job)` | The job's own requirements as hard filters, budget (`salary_max`) included. City only binds hybrid/onsite jobs. |
 | `match_job(session, job_id, actor, progress)` | The job-matching entry point: uses the stored job vector (no embedding call), keywords from title + skills + city, the job's document (never its pay) as the brief. 409 if the embedding isn't ready. |
 | `_counts(result)` | Counts for logs and audit. |
 | `_find_rank_and_filter(...)` | The shared pipeline: hybrid fetch (twice when filters are set, once more when facts were read from the text), load rankable profiles, rank, split by filters. |
+
+### `semantic_search/evaluation.py`
+
+Scores search against the hand-graded golden set in `backend/evals/` (how to grade and run it: [backend/evals/README.md](../../backend/evals/README.md)).
+
+| Function | What it does |
+|---|---|
+| `GoldenSet` / `GoldenCase` / `GoldenCandidate` | The `golden_set.json` format. A case counts as `graded` only when every candidate has a grade 0-3. |
+| `ndcg_at(ranked, grades, k=10)` | NDCG with gain `2^grade - 1`; ungraded results count as 0; `None` when nobody in the case is graded above 0. |
+| `precision_at(ranked, grades, k=5)` | Share of the top k graded 2 or more (divides by k even with fewer results). |
+| `experience_band(years)` | 0-3, 3-8, 8-15, 15+ years: the stand-in for age, which isn't collected. |
+| `group_rates(outcomes, dimension)` | Of the people graded 2+, the share of each group (country or experience band) found in the top 10. Flags a group of 5+ found at under 80% of the best group's rate (four-fifths rule). |
+| `run_eval(session, golden)` | Runs every graded case through `find_matches` (real, metered calls) and builds the `EvalReport`. |
+| `new_case(session, id, query, count, rng)` | A case to grade from `label_pool`: synthetic profiles only (the file is committed), shuffled. |
+| `report_markdown(report)` | The run as a readable page. |
 
 ### `semantic_search/history.py`, `repository.py`, `models.py`
 
@@ -437,17 +455,19 @@ They live at the root, not under `/api/v1`, so load balancers don't depend on AP
 
 ## resumes
 
-Reads uploaded resumes with **ResumeAI** (the user's own service, `RESUMEAI_BASE_URL`, key `RESUMEAI_API_KEY`) and shows ResumeAI's formatted resume PDF. We keep no file: ResumeAI keeps the extracted data under a pair we choose, `(resume_ref, "resume")`, and `candidates.resume_ref` stores that UUID.
+Reads uploaded resumes with **ResumeAI** (the user's own service, `RESUMEAI_BASE_URL`, key `RESUMEAI_API_KEY`) and shows ResumeAI's formatted resume PDF. ResumeAI keeps the extracted data under a pair we choose, `(resume_ref, "resume")`, and `candidates.resume_ref` stores that UUID. We keep one file: a copy of the formatted PDF in object storage, whose key is `candidates.resume_pdf_key`.
 
 | Endpoint | Function | Who |
 |---|---|---|
 | `POST /api/v1/resumes` | `router.read_resume` → `service.read_new_resume` | public; needs `X-Requested-With: fetch`; `RESUME_UPLOAD_LIMIT` per IP per hour (default 10). For a profile not saved yet: makes a fresh `resume_ref`, reads the file, returns `{resume_ref, profile}` (suggestions). |
 | `PUT /api/v1/admin/candidates/{id}/resume` | `router.attach_resume` → `service.attach_resume` | staff, 204. Reads the file for a saved candidate and links it; the profile fields and `version` don't change. A replacement reuses the candidate's ref, so ResumeAI overwrites its data. |
-| `GET /api/v1/admin/candidates/{id}/resume` | `router.formatted_resume` → `service.formatted_resume_pdf` | staff. The PDF, `inline; filename="resume.pdf"`, `no-store`; rendered by ResumeAI on every call. 404 without a resume (ResumeAI isn't asked). Audited as `candidate.resume_view`. |
+| `GET /api/v1/admin/candidates/{id}/resume` | `router.formatted_resume` → `service.formatted_resume_pdf` | staff. The PDF, `inline; filename="resume.pdf"`, `no-store`: the stored copy, or rendered by ResumeAI and then stored. 404 without a resume (ResumeAI isn't asked). Audited as `candidate.resume_view`. |
 
-- **The file is the raw request body**, not multipart: FastAPI's form parsing needs `python-multipart`, a new dependency for one field. `BodySizeLimitMiddleware` gives the two upload paths (`resumes.UPLOAD_PATHS`) `MAX_RESUME_BYTES` (10 MB); every other route keeps 64 KB.
+- **The file is the raw request body**, not multipart: FastAPI's form parsing needs `python-multipart`, a new dependency for one field. `BodySizeLimitMiddleware` gives the two upload paths (`resumes.UPLOAD_PATHS`) `MAX_RESUME_BYTES` (4 MB: Vercel refuses bodies over 4.5 MB); every other route keeps 64 KB.
 - `client.ResumeAIClient` uses `httpx2` (already installed for OpenAI), with `RESUMEAI_TIMEOUT_SECONDS` (120) and **no retries**: a person pressed the button and can press it again, and a failed read still counts against ResumeAI's 30-an-hour limit. Errors become plain messages: 401 and 402 → 503, 413/415/429 pass through (429 keeps `Retry-After`), 422 shows ResumeAI's sentence only when it is one, other failures → 502, timeouts and connection errors → 503. Only the status code is logged, never ResumeAI's body.
 - `mapping.to_profile` turns ResumeAI's data into form suggestions: dates written like "Jan 2021" or "Present" become `YYYY-MM` and `is_current`, "Pune, India" becomes city + country code, links are sorted into LinkedIn / GitHub / portfolio, skills become tags, years of experience is first start to last end. Anything unreadable stays empty; nothing is guessed. Lengths are cut to the form's limits.
-- `candidates.get_resume_ref` and `candidates.attach_resume` are the only ways `resumes` touches candidate data. A ref that's never saved with a profile leaves unused data at ResumeAI.
+- **Stored copy** (`service.formatted_resume_pdf`, `_keep_pdf`): with a store configured (`core.storage.get_storage()`), the first view fetches from ResumeAI, uploads to `resumes/<candidate id>/<uuid4>.pdf` and records the key with `candidates.record_resume_pdf`. That write is a plain UPDATE (no `version` bump) and only succeeds if the resume ref, the profile `version` and the previous key are unchanged since the view started; otherwise the copy is already stale and its file is deleted. Later views read the file and skip ResumeAI. A stored key whose file has gone missing is fetched again and replaced. A storage error never fails the view: the PDF just comes from ResumeAI.
+- **Invalidation** (user decision: any change): a profile edit that changes a field (`candidates.update_candidate`), a new or replaced resume (`candidates.attach_resume`) and a delete clear `resume_pdf_key` in the same transaction, then `core.storage.discard` deletes the file after the commit (a failed delete only leaves an orphan, logged). A save with nothing changed keeps the copy.
+- `candidates.get_resume_ref`, `open_resume`, `record_resume_pdf` and `attach_resume` are the only ways `resumes` touches candidate data. A ref that's never saved with a profile leaves unused data at ResumeAI.
 
 Next: [06-frontend.md](06-frontend.md).

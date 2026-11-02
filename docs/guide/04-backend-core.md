@@ -166,6 +166,29 @@ Each counted attempt is a row in `rate_limit_hits`. Storing them in Postgres (no
 | `get_model_price(model)` | Price or `UnknownModelPriceError`. |
 | `compute_cost_usd(model, input_tokens, output_tokens)` | Exact `Decimal` math, rounded **up** to 6 decimals so spend is never undercounted. |
 
+## `core/storage.py`: object storage
+
+S3-compatible storage (Neon object storage) for files we keep: today only the formatted resume PDFs.
+
+| Name | What it does |
+|---|---|
+| `ObjectStorage` | The protocol: `put(key, body, content_type)`, `get(key)` (None when missing), `delete(key)` (missing is fine). |
+| `S3Storage` | boto3, path-style addressing and SigV4 (Neon supports only these), 3 attempts in standard retry mode, 5 s connect / 30 s read timeouts. boto3 is synchronous, so every call runs in `asyncio.to_thread`. Errors become `StorageError` naming only the exception class, never a key or body. |
+| `get_storage()` | The store from `RESUME_BUCKET` + `AWS_ENDPOINT_URL_S3` / `AWS_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, or `None` when the bucket or keys are missing (callers then work without storing). |
+| `use_storage(store)` | Tests install an in-memory store; `None` clears the slot. The root `conftest.py` blanks the bucket and keys so tests never reach the real bucket. |
+| `discard(key)` | Delete a file nothing points at any more; failures are logged, not raised. |
+
+## Serverless (Vercel): `app/maintenance.py` and `main.py`
+
+Vercel runs the API as a function with no process left running between requests, so the background runner never runs there (`MAINTENANCE_IN_API=false`). Two things replace it:
+
+| Name | What it does |
+|---|---|
+| `embed_after_saves` | HTTP middleware, added only when `EMBED_ON_SAVE=true`. After a successful POST/PUT/PATCH under `/api/v1/candidates`, `/api/v1/admin/candidates` or `/api/v1/jobs`, it awaits `embed_stale_now` **before** answering (about a second), because the function may stop once it has answered. |
+| `embed_stale_now()` | One `embeddings.embed_all_stale` pass (one batch per target, trigger `api`). Never raises: the save has already committed, and anything missed is picked up by the next save or the cron run. |
+| `GET /api/v1/internal/maintenance` (`run_scheduled_maintenance`) | Runs every maintenance task once (`run_maintenance(once=True)`). Vercel Cron calls it daily (`backend/vercel.json`) with `Authorization: Bearer <CRON_SECRET>`; anything else gets a 404, so the route doesn't show it exists. Not in the OpenAPI schema. |
+| `main.FRONTEND_DIST` | `backend/frontend_dist`; when it exists, `create_app` serves the built frontend from `/` (API routes always win). |
+
 ## `core/vector.py`
 
 | Name | What it does |

@@ -45,7 +45,8 @@ async def attach_resume(
 async def formatted_resume(
     candidate_id: uuid.UUID, session: SessionDep, actor: CurrentUser
 ) -> Response:
-    """The formatted resume PDF, opened in a browser tab. Rendered by ResumeAI on each call."""
+    """The formatted resume PDF, opened in a browser tab: the stored copy, or rendered by
+    ResumeAI (and then stored) when there is none."""
     pdf = await service.formatted_resume_pdf(session, candidate_id, actor)
     return Response(
         pdf,

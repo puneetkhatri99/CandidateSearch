@@ -177,15 +177,54 @@ async def get_candidate_row(session: AsyncSession, candidate_id: uuid.UUID) -> C
     return await session.get(Candidate, candidate_id)
 
 
+async def lock_resume_pdf_key(
+    session: AsyncSession, candidate_id: uuid.UUID
+) -> tuple[bool, str | None]:
+    """Whether the candidate exists, and their stored PDF key, with the row locked."""
+    row = (
+        await session.execute(
+            select(Candidate.resume_pdf_key).where(Candidate.id == candidate_id).with_for_update()
+        )
+    ).one_or_none()
+    return (row is not None, row[0] if row is not None else None)
+
+
 async def set_resume_ref(
     session: AsyncSession, candidate_id: uuid.UUID, resume_ref: uuid.UUID
 ) -> bool:
     # A plain UPDATE: attaching a file isn't a profile edit, so `version` stays and an editor
-    # with the profile open can still save.
+    # with the profile open can still save. A new resume makes any stored PDF stale.
     result = await session.execute(
         update(Candidate)
         .where(Candidate.id == candidate_id)
-        .values(resume_ref=resume_ref)
+        .values(resume_ref=resume_ref, resume_pdf_key=None)
+        .returning(Candidate.id)
+        .execution_options(synchronize_session=False)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def set_resume_pdf_key(
+    session: AsyncSession,
+    candidate_id: uuid.UUID,
+    key: str,
+    *,
+    resume_ref: uuid.UUID,
+    version: int,
+    replacing: str | None,
+) -> bool:
+    """Record a stored PDF only if nothing changed since it was fetched: same resume, same
+    profile version, and the key it replaces is still the current one (so of two views racing,
+    only the first is kept). Plain UPDATE, so `version` doesn't move."""
+    result = await session.execute(
+        update(Candidate)
+        .where(
+            Candidate.id == candidate_id,
+            Candidate.resume_ref == resume_ref,
+            Candidate.version == version,
+            Candidate.resume_pdf_key.is_not_distinct_from(replacing),
+        )
+        .values(resume_pdf_key=key)
         .returning(Candidate.id)
         .execution_options(synchronize_session=False)
     )
@@ -222,9 +261,16 @@ async def list_bookmarks(session: AsyncSession) -> list[tuple[CandidateBookmark,
     return [(bookmark, candidate) for bookmark, candidate in rows]
 
 
-async def delete_candidate(session: AsyncSession, candidate_id: uuid.UUID) -> bool:
+async def delete_candidate(
+    session: AsyncSession, candidate_id: uuid.UUID
+) -> tuple[bool, str | None]:
+    """Whether a row was deleted, and its stored PDF key (the caller deletes that file)."""
     # Child rows go via ON DELETE CASCADE; no need to load them.
-    result = await session.execute(
-        delete(Candidate).where(Candidate.id == candidate_id).returning(Candidate.id)
-    )
-    return result.scalar_one_or_none() is not None
+    row = (
+        await session.execute(
+            delete(Candidate)
+            .where(Candidate.id == candidate_id)
+            .returning(Candidate.id, Candidate.resume_pdf_key)
+        )
+    ).one_or_none()
+    return (row is not None, row[1] if row is not None else None)

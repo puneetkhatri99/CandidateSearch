@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,11 @@ from app.core.logging import configure_logging
 from app.core.maintenance import start_background_maintenance, stop_background_maintenance
 from app.core.middleware import RequestContextMiddleware
 from app.features import ai_usage, auth, candidates, health, jobs, resumes, semantic_search
-from app.maintenance import maintenance_tasks
+from app.maintenance import cron_router, embed_after_saves, maintenance_tasks
+
+# The built frontend, copied here by scripts/deploy-vercel.ps1 for a one-server deploy. Absent in
+# local development, where Vite serves the frontend.
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend_dist"
 
 
 @asynccontextmanager
@@ -46,6 +51,8 @@ def create_app() -> FastAPI:
     # inside CORS and request-context (headers, log line); the body limit is next so 413
     # responses also carry CORS headers.
     app.add_middleware(UnhandledErrorMiddleware)
+    if settings.embed_on_save:
+        app.middleware("http")(embed_after_saves)
     app.add_middleware(
         BodySizeLimitMiddleware,
         max_bytes=settings.max_request_body_bytes,
@@ -75,7 +82,12 @@ def create_app() -> FastAPI:
     api_v1.include_router(semantic_search.router)
     api_v1.include_router(health.admin_router)
     api_v1.include_router(resumes.router)
+    api_v1.include_router(cron_router)
     app.include_router(api_v1)
+
+    if FRONTEND_DIST.is_dir():
+        # API routes always win over these files; an unknown page path gets index.html.
+        app.frontend("/", directory=FRONTEND_DIST, fallback="index.html")
 
     return app
 

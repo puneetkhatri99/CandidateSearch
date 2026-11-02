@@ -5,12 +5,19 @@ import { fileURLToPath } from 'node:url'
 export const BACKEND_DIR = fileURLToPath(new URL('../../../backend/', import.meta.url))
 const PYTHON = process.platform === 'win32' ? `${BACKEND_DIR}.venv\\Scripts\\python.exe` : `${BACKEND_DIR}.venv/bin/python`
 
-/** Same rule as backend/conftest.py: TEST_DATABASE_URL wins, else `<dev db name>_test`. */
+/** Same rule as backend/conftest.py: TEST_DATABASE_URL wins (environment, then backend/.env),
+ * else `<dev db name>_test` from a local DATABASE_URL. */
 export function testDatabaseUrl(): string {
   if (process.env.TEST_DATABASE_URL) return process.env.TEST_DATABASE_URL
   const env = readFileSync(`${BACKEND_DIR}.env`, 'utf8')
+  const fromFile = /^TEST_DATABASE_URL\s*=\s*"?([^"\r\n]+)"?/m.exec(env)?.[1]
+  if (fromFile) return fromFile
   const devUrl = /^DATABASE_URL\s*=\s*"?([^"\r\n]+)"?/m.exec(env)?.[1]
   if (!devUrl) throw new Error('DATABASE_URL not found in backend/.env; set TEST_DATABASE_URL.')
+  // e2e cleanup deletes rows: never derive a test database on a hosted server (Neon).
+  if (!/@(localhost|127\.0\.0\.1)[:/]/.test(devUrl)) {
+    throw new Error("DATABASE_URL isn't local; set TEST_DATABASE_URL in backend/.env.")
+  }
   const slash = devUrl.lastIndexOf('/')
   return `${devUrl.slice(0, slash)}/${devUrl.slice(slash + 1)}_test`
 }

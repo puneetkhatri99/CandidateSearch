@@ -1,20 +1,22 @@
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx2
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
+from app.core.storage import StorageError, get_storage, use_storage
 from app.features import resumes
 from app.features.audit.models import AuditEvent
 from app.features.candidates import CandidateCreate, create_candidate
 from app.features.candidates.models import Candidate
+from app.features.candidates.schemas import CandidateUpdate
 from app.features.candidates.tests.factories import valid_candidate_payload
 from tests.integration.conftest import FETCH_HEADERS
 
@@ -141,7 +143,7 @@ async def test_an_empty_upload_is_refused_without_calling_resumeai(
     assert resumeai.requests == []
 
 
-async def test_uploads_may_be_up_to_10_mb_but_other_bodies_stay_small(
+async def test_uploads_may_be_up_to_4_mb_but_other_bodies_stay_small(
     client: AsyncClient, resumeai: FakeResumeAI
 ) -> None:
     assert (await _upload(client, "/api/v1/resumes", b"x" * 1_000_000)).status_code == 200
@@ -346,3 +348,202 @@ async def test_viewing_a_resume_needs_login(client: AsyncClient) -> None:
 async def _count_candidates() -> int:
     async with get_sessionmaker()() as session:
         return await session.scalar(select(func.count()).select_from(Candidate)) or 0
+
+
+# --- The stored copy of the formatted PDF ---------------------------------------------------
+
+
+@dataclass
+class FakeStorage:
+    """An in-memory object store. `before_put` runs inside put, to change things mid-fetch."""
+
+    objects: dict[str, bytes] = field(default_factory=dict)
+    fail: bool = False
+    before_put: Callable[[], Awaitable[None]] | None = None
+
+    async def put(self, key: str, body: bytes, content_type: str) -> None:
+        assert content_type == "application/pdf"
+        if self.fail:
+            raise StorageError("put failed: EndpointConnectionError")
+        if self.before_put is not None:
+            await self.before_put()
+        self.objects[key] = body
+
+    async def get(self, key: str) -> bytes | None:
+        if self.fail:
+            raise StorageError("get failed: EndpointConnectionError")
+        return self.objects.get(key)
+
+    async def delete(self, key: str) -> None:
+        self.objects.pop(key, None)
+
+
+@pytest.fixture
+def store() -> Iterator[FakeStorage]:
+    fake = FakeStorage()
+    use_storage(fake)
+    yield fake
+    use_storage(None)
+
+
+async def _pdf_key(candidate_id: uuid.UUID) -> str | None:
+    async with get_sessionmaker()() as session:
+        return await session.scalar(
+            select(Candidate.resume_pdf_key).where(Candidate.id == candidate_id)
+        )
+
+
+def _pdf_fetches(resumeai: FakeResumeAI) -> int:
+    return sum(r.method == "GET" for r in resumeai.requests)
+
+
+async def _with_resume(client: AsyncClient) -> tuple[uuid.UUID, str]:
+    candidate_id = await _seed()
+    url = f"/api/v1/admin/candidates/{candidate_id}/resume"
+    assert (await _upload(client, url, method="PUT")).status_code == 204
+    return candidate_id, url
+
+
+def _same_profile(detail: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    return {k: v for k, v in detail.items() if k in CandidateUpdate.model_fields} | changes
+
+
+async def test_the_first_view_stores_the_pdf_and_later_views_skip_resumeai(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+
+    first = await admin_client.get(url)
+    second = await admin_client.get(url)
+
+    assert first.content == second.content == PDF
+    assert _pdf_fetches(resumeai) == 1
+    key = await _pdf_key(candidate_id)
+    assert key is not None and key.startswith(f"resumes/{candidate_id}/")
+    assert store.objects == {key: PDF}
+    # Storing the link isn't a profile edit: an editor with the profile open can still save.
+    detail = (await admin_client.get(f"/api/v1/admin/candidates/{candidate_id}")).json()
+    assert detail["version"] == 1
+
+
+async def test_a_profile_edit_removes_the_stored_pdf_and_the_next_view_fetches_again(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+    await admin_client.get(url)
+    detail = (await admin_client.get(f"/api/v1/admin/candidates/{candidate_id}")).json()
+
+    edited = await admin_client.put(
+        f"/api/v1/admin/candidates/{candidate_id}", json=_same_profile(detail, city="Pune")
+    )
+
+    assert edited.status_code == 200, edited.text
+    assert await _pdf_key(candidate_id) is None
+    assert store.objects == {}
+    assert (await admin_client.get(url)).content == PDF
+    assert _pdf_fetches(resumeai) == 2
+    assert len(store.objects) == 1
+
+
+async def test_saving_an_unchanged_profile_keeps_the_stored_pdf(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+    await admin_client.get(url)
+    key = await _pdf_key(candidate_id)
+    detail = (await admin_client.get(f"/api/v1/admin/candidates/{candidate_id}")).json()
+
+    saved = await admin_client.put(
+        f"/api/v1/admin/candidates/{candidate_id}", json=_same_profile(detail)
+    )
+
+    assert saved.status_code == 200, saved.text
+    assert await _pdf_key(candidate_id) == key
+    assert key in store.objects
+
+
+async def test_replacing_the_resume_removes_the_stored_pdf(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+    await admin_client.get(url)
+
+    assert (await _upload(admin_client, url, b"newer resume", method="PUT")).status_code == 204
+
+    assert await _pdf_key(candidate_id) is None
+    assert store.objects == {}
+
+
+async def test_deleting_the_candidate_deletes_the_stored_pdf(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+    await admin_client.get(url)
+
+    deleted = await admin_client.delete(f"/api/v1/admin/candidates/{candidate_id}")
+
+    assert deleted.status_code == 204
+    assert store.objects == {}
+
+
+async def test_a_pdf_fetched_while_the_profile_changed_is_not_kept(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+
+    async def edit_meanwhile() -> None:
+        async with get_sessionmaker()() as session, session.begin():
+            await session.execute(
+                update(Candidate)
+                .where(Candidate.id == candidate_id)
+                .values(version=Candidate.version + 1)
+            )
+
+    store.before_put = edit_meanwhile
+
+    response = await admin_client.get(url)
+
+    assert response.content == PDF  # the person still sees the resume
+    assert await _pdf_key(candidate_id) is None
+    assert store.objects == {}
+
+
+async def test_a_stored_pdf_that_went_missing_is_fetched_and_replaced(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+    await admin_client.get(url)
+    old_key = await _pdf_key(candidate_id)
+    store.objects.clear()
+
+    assert (await admin_client.get(url)).content == PDF
+
+    new_key = await _pdf_key(candidate_id)
+    assert new_key is not None and new_key != old_key
+    assert store.objects == {new_key: PDF}
+
+
+async def test_a_storage_outage_still_shows_the_resume(
+    admin_client: AsyncClient, resumeai: FakeResumeAI, store: FakeStorage
+) -> None:
+    candidate_id, url = await _with_resume(admin_client)
+    store.fail = True
+
+    response = await admin_client.get(url)
+
+    assert response.status_code == 200
+    assert response.content == PDF
+    assert await _pdf_key(candidate_id) is None
+
+
+async def test_without_storage_every_view_asks_resumeai(
+    admin_client: AsyncClient, resumeai: FakeResumeAI
+) -> None:
+    assert get_storage() is None  # the test settings have no bucket
+    candidate_id, url = await _with_resume(admin_client)
+
+    await admin_client.get(url)
+    await admin_client.get(url)
+
+    assert _pdf_fetches(resumeai) == 2
+    assert await _pdf_key(candidate_id) is None

@@ -5,7 +5,7 @@ import { Alert, Button, FormSection, useElapsedSeconds } from '@/shared/ui'
 import { fillFromResume, MAX_RESUME_BYTES, readResume, RESUME_FILE_TYPES } from '../resume'
 import type { ProfileFormValues } from '../schema'
 
-const TOO_LARGE = 'The file is too large. Upload one under 10 MB.'
+const TOO_LARGE = 'The file is too large. Upload one under 4 MB.'
 // ResumeAI's guide: 5-30 s normally; a scanned PDF or a service waking from idle takes longer.
 const USUAL_SECONDS = 30
 
@@ -175,7 +175,7 @@ export function ResumeUpload({ audience }: ResumeUploadProps) {
             <span className="text-base text-fg">
               <span className="font-semibold text-accent-fg">Choose a file</span> or drag it here
             </span>
-            <span className="text-sm">PDF, Word or text · up to 4 pages · 10 MB</span>
+            <span className="text-sm">PDF, Word or text · up to 4 pages · 4 MB</span>
           </label>
         )}
 

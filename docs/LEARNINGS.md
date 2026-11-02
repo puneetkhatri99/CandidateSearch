@@ -730,3 +730,47 @@ A running log of things learned about this project: decisions, gotchas, provider
     - jsdom keeps `localStorage` between tests, so `src/test/setup.ts` now clears it after each test; otherwise one test's search would redirect the next.
   - **Query text is now stored** (`saved_searches.query`) for its owner. Logs and audit rows still never contain it.
 - **Impact / action:** Migration `a9c4e2d7f1b3` (additive) is applied to the dev DB. Job matches are not saved. No e2e flow covers this yet; unit and integration tests do.
+
+### 2026-11-02: Search evaluation: golden set, NDCG/precision and a fairness check
+- **Context:** Closing the "no evals, no bias checks" gap (RULES sections 8 and 9).
+- **Learning:**
+  - `backend/evals/golden_set.json` holds 10 searches with 199 candidates to grade by hand. `eval-search` runs the graded ones through `semantic_search.find_matches` (the real pipeline, about $0.05 each) and reports NDCG@10, precision@5 and, per country and experience band, the share of qualified people (graded 2+) who reached the top 10. Groups of 5+ found at under 80% of the best group's rate are flagged (four-fifths rule).
+  - **The candidates to grade come from the hybrid fetch without the AI ranking, shuffled.** Taking them from the AI's own top 25 would make the grades echo the system under test, and it could never show a good person the AI missed. `label_pool` costs one query embedding.
+  - **The golden set is committed, so it names synthetic seed profiles only** (`source = "synthetic"`, `seed.NNNNN@example.com`); `new_case` drops anything else. The grades only mean something on a DB seeded with the default `scripts.seed_candidates` seed.
+  - `search_by_meaning` was split: `find_matches` is the search (returns the result and the understood facts), `search_by_meaning` adds the audit row and saved search. An eval run therefore writes no audit rows or history.
+  - Gender, age and ethnicity aren't collected, so they can't be checked; experience band is the age stand-in. This is not a Local Law 144 bias audit.
+  - On Windows, `open()` without `encoding="utf-8"` reads UTF-8 files as cp1252, so a quick `python -c` check shows `·` as `Â·`. The file was fine; read it with an explicit encoding before "fixing" an encoding bug.
+- **Impact / action:** The grades are still empty: a person must grade before the first real run. Run `eval-search` and commit its report with every change to `rank_*` / `understand_*` prompts or the ranking model.
+
+### 2026-11-02: Formatted resume PDFs are stored in Neon object storage
+- **Context:** The user asked to keep a copy of the formatted resume in an S3 bucket, with its link in the database, and to drop it and fetch again when anything changes.
+- **Learning:**
+  - Neon object storage is S3-compatible. It uses the standard `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` names, path-style addressing and SigV4 only. The bucket name isn't injected, so it is `RESUME_BUCKET` (here `resume`). Credentials come only from the `neon` CLI (`neon env pull --service object-storage`).
+  - `candidates.resume_pdf_key` stores the object **key**, not a URL: a presigned URL expires, and the API streams the bytes itself so the session check and the `candidate.resume_view` audit still apply.
+  - **Any** changed profile field, a new or replaced resume, or a delete clears the key in the same transaction and deletes the file after the commit (user decision). ResumeAI's PDF doesn't use our profile, so a refetch after an edit looks the same; the cost is one ResumeAI read (about 15 s and 1 of its 30 reads an hour).
+  - A fetched copy is recorded only if the resume ref, the profile `version` and the previous key are unchanged (one plain UPDATE, no `version` bump); otherwise the new file is deleted. This covers an edit during the 15 s render and two views racing.
+  - boto3 is synchronous: every call runs in `asyncio.to_thread`. It ships no type hints, so mypy ignores `boto3` / `botocore.*` and `core/storage.py` wraps it in typed methods. boto3 and botocore are pinned to 1.43.100 (botocore publishes daily).
+  - The root `conftest.py` blanks `RESUME_BUCKET` and the `AWS_*` keys: `backend/.env` holds the real Neon keys, and pydantic-settings would otherwise load them in tests.
+  - The local database (the commented `DATABASE_URL`) doesn't have migration `b5e2c8a4d7f1` yet; run `alembic upgrade head` after switching back to it.
+  - (Correction to an earlier answer: `RATE_LIMIT_KEY_SECRET` *is* documented in `.env.example`, as a commented line.)
+- **Impact / action:** Storage problems never fail "See resume"; it falls back to ResumeAI. Orphan files are possible only when a delete fails after the commit (logged as `stored_file_not_deleted`).
+
+### 2026-11-02: Netlify hosts the frontend; /api is proxied to the backend (~~superseded~~: the app deploys to Vercel as one; see below)
+- **Context:** Writing the Netlify deployment.
+- **Learning:**
+  - The frontend sends the session cookie only to its own site (`credentials: 'same-origin'`), so the browser must reach the API on the Netlify domain. `netlify.toml` (repo root, base `frontend`) runs `scripts/netlify-redirects.mjs` after the build, which writes `dist/_redirects` with `/api/* -> $API_ORIGIN/api/:splat 200` and the SPA fallback. The backend address therefore lives in a Netlify environment variable, not in git, and a build without a valid `https://` origin fails.
+  - Netlify proxy rewrites time out after **26 seconds**. An AI search takes 20-30 s and a resume read 5-120 s, so some of them may be cut off; a backend that sleeps when idle (Render free plan) can miss the first request too. If that happens, move to a custom domain (app./api. subdomains, `credentials: 'include'`) or serve the frontend from the backend.
+- **Impact / action:** Set `API_ORIGIN` in Netlify before the first deploy. Test a search and a resume upload right after deploying.
+
+### 2026-11-02: One-app deploy on Vercel
+- **Context:** The user wanted the frontend and backend deployed together. Netlify can't run this backend (short functions, 26 s proxy limit, no long-running server); Vercel runs FastAPI as a Python function.
+- **Learning:**
+  - `backend/` is the Vercel project root: Vercel finds `app` in `app/main.py` (`[tool.vercel] entrypoint`), installs the `[project]` dependencies from `pyproject.toml` (dev extras excluded), and uses Python 3.13 (`.python-version`). `vercel.json` there sets `maxDuration` 300 s (the Hobby maximum with Fluid compute), a daily cron, and security headers. `.vercelignore` keeps `.env`, `.venv`, tests, evals and migrations out of the upload.
+  - **Frontend:** the deploy script copies `frontend/dist` into `backend/frontend_dist`; FastAPI's `app.frontend("/", fallback="index.html")` serves it, and Vercel promotes it to the CDN. Because the app has middleware, that needs `[tool.vercel.fastapi.static] cdn = true`. The `index.html` fallback only answers navigation requests (`Accept: text/html`, no file extension); other misses reach the API.
+  - **4.5 MB request bodies:** Vercel refuses larger ones before the app sees them, so resume uploads are 4 MiB everywhere (was 10 MB).
+  - **No background loop:** `MAINTENANCE_IN_API=false`. `EMBED_ON_SAVE=true` makes candidate and job saves embed before answering, about a second each; work after the answer isn't guaranteed to run on a serverless function. A daily Vercel Cron call (`CRON_SECRET`) runs the pruning and embeds leftovers (budget re-drives, failed retries). As far as we know, Hobby crons run at most daily.
+  - **Per-instance state:** each function instance has its own DB pool (set `DB_POOL_SIZE=2`, `DB_MAX_OVERFLOW=3`), its own 10-minute ranking cache and its own "pay once" sharing, so a repeated search on another instance pays again. The rate limiter is already in Postgres, so it holds across instances.
+  - Migrations don't run on Vercel: `scripts/deploy-vercel.ps1` runs `alembic upgrade head` against the production database first (refusing a localhost URL), then checks the Vercel environment variables by name, deploys with a pinned Vercel CLI (63.1.2) and smoke-tests `/health`, `/ready` and `/`.
+  - In Windows PowerShell 5.1, `2>&1` on a native command under `$ErrorActionPreference = 'Stop'` throws on the first stderr line (the Vercel CLI prints its banner there), so the script reads stdout only.
+  - Not verified on Vercel itself (no deploy was made from this machine): that streamed search events arrive one by one rather than all at the end.
+- **Impact / action:** Run `scripts\deploy-vercel.ps1` from the repo root. Test a search and a resume upload right after the first deploy.

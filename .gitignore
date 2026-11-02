@@ -22,3 +22,8 @@ dist/
 .DS_Store
 Thumbs.db
 .idea/
+
+# Built frontend copied in by scripts/deploy-vercel.ps1
+backend/frontend_dist/
+# Vercel CLI project link
+.vercel/

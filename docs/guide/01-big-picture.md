@@ -72,7 +72,7 @@ candidateSearch/
   backend/
     app/
       main.py           builds the FastAPI app
-      cli.py            command-line tools (create-admin, embed-backfill, maintenance)
+      cli.py            command-line tools (create-admin, embed-backfill, maintenance, eval-label, eval-search)
       maintenance.py    the list of background tasks
       core/             infrastructure: config, database, errors, logging, OpenAI clients
       shared/           small helpers used by several features

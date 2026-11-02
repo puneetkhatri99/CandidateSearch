@@ -125,7 +125,7 @@ def _error_for(response: httpx2.Response) -> Exception:
         case 404:
             return NotFoundError("The resume service has no resume stored for this candidate.")
         case 413:
-            return ResumeFileTooLargeError("The file is too large. Upload one under 10 MB.")
+            return ResumeFileTooLargeError("The file is too large. Upload one under 4 MB.")
         case 415:
             return UnsupportedResumeFileError("Upload a PDF, Word (DOC or DOCX) or text file.")
         case 422:

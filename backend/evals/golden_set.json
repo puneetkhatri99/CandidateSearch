@@ -1,0 +1,1547 @@
+{
+  "cases": [
+    {
+      "id": "backend-python-pune",
+      "query": "python backend developer in pune",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00333@example.com",
+          "profile": "Senior Backend Engineer · Toronto, CA · 6 years · python, aws, postgresql, go, rest apis, fastapi",
+          "country": "CA",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00519@example.com",
+          "profile": "Junior Backend Engineer · Pune, IN · 1.5 years · redis, java, rest apis, kafka, microservices, grpc, django, postgresql",
+          "country": "IN",
+          "years": 1.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00363@example.com",
+          "profile": "Senior Backend Engineer · Chennai, IN · 5.5 years · go, docker, redis, microservices, fastapi, python, kafka, grpc",
+          "country": "IN",
+          "years": 5.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00557@example.com",
+          "profile": "Backend Engineer · Pune, IN · 4.5 years · django, redis, python, rest apis, aws",
+          "country": "IN",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00550@example.com",
+          "profile": "Junior Backend Engineer · Bengaluru, IN · 1 years · rest apis, python, spring boot, aws, fastapi, go",
+          "country": "IN",
+          "years": 1.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00948@example.com",
+          "profile": "Backend Engineer · Amsterdam, NL · 3.5 years · python, aws, go, docker, rest apis, java",
+          "country": "NL",
+          "years": 3.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00750@example.com",
+          "profile": "Senior Backend Engineer · Pune, IN · 8 years · spring boot, docker, grpc, redis",
+          "country": "IN",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00947@example.com",
+          "profile": "Senior Backend Engineer · Dubai, AE · 9.5 years · python, aws, microservices, spring boot, grpc, fastapi, kafka",
+          "country": "AE",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00388@example.com",
+          "profile": "Lead Backend Engineer · Mumbai, IN · 13.5 years · kafka, aws, postgresql, rest apis, spring boot, fastapi, django, redis, docker, grpc",
+          "country": "IN",
+          "years": 13.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00013@example.com",
+          "profile": "Junior Backend Engineer · Pune, IN · 0 years · django, kafka, redis, grpc, go, java, aws, rest apis, python, docker",
+          "country": "IN",
+          "years": 0.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00599@example.com",
+          "profile": "Backend Engineer · Bengaluru, IN · 2.5 years · docker, fastapi, python, spring boot, microservices, rest apis",
+          "country": "IN",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00847@example.com",
+          "profile": "Backend Engineer · Pune, IN · 2.5 years · grpc, docker, redis, postgresql, rest apis",
+          "country": "IN",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00248@example.com",
+          "profile": "Backend Engineer · Pune, IN · 4.5 years · java, django, go, docker, aws, rest apis, python, microservices, fastapi",
+          "country": "IN",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00378@example.com",
+          "profile": "Mobile Developer · Pune, IN · 2.5 years · ios, swift, android, firebase",
+          "country": "IN",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00045@example.com",
+          "profile": "Lead Backend Engineer · Mumbai, IN · 11 years · kafka, java, redis, go, python, spring boot, grpc, aws, postgresql, docker",
+          "country": "IN",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00988@example.com",
+          "profile": "Lead Backend Engineer · Mumbai, IN · 10 years · go, java, spring boot, fastapi, django",
+          "country": "IN",
+          "years": 10.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00616@example.com",
+          "profile": "Lead Backend Engineer · Bengaluru, IN · 11 years · aws, django, postgresql, redis, fastapi, python, rest apis, docker, java",
+          "country": "IN",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00009@example.com",
+          "profile": "Lead Backend Engineer · Chennai, IN · 14.5 years · grpc, postgresql, django, aws, go, spring boot, microservices, kafka, java, python",
+          "country": "IN",
+          "years": 14.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00992@example.com",
+          "profile": "Senior Backend Engineer · London, GB · 6 years · go, spring boot, aws, python, django, redis, microservices, grpc, postgresql, kafka",
+          "country": "GB",
+          "years": 6.0,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "senior-java-microservices",
+      "query": "senior java engineer with spring boot and microservices",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00856@example.com",
+          "profile": "Senior Backend Engineer · Amsterdam, NL · 5 years · fastapi, microservices, redis, go, aws, rest apis, django, postgresql, java, docker",
+          "country": "NL",
+          "years": 5.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00157@example.com",
+          "profile": "Lead Backend Engineer · New York, US · 11.5 years · spring boot, kafka, redis, go, grpc, java, docker, python, microservices",
+          "country": "US",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00215@example.com",
+          "profile": "Senior Backend Engineer · Mumbai, IN · 5 years · kafka, java, django, spring boot, grpc, aws, rest apis",
+          "country": "IN",
+          "years": 5.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00276@example.com",
+          "profile": "Senior Backend Engineer · New Delhi, IN · 6 years · redis, docker, spring boot, fastapi, kafka, django, postgresql, grpc, microservices",
+          "country": "IN",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00045@example.com",
+          "profile": "Lead Backend Engineer · Mumbai, IN · 11 years · kafka, java, redis, go, python, spring boot, grpc, aws, postgresql, docker",
+          "country": "IN",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00893@example.com",
+          "profile": "Backend Engineer · Bengaluru, IN · 3 years · spring boot, java, kafka, rest apis, postgresql, fastapi, grpc, django, aws",
+          "country": "IN",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00513@example.com",
+          "profile": "Senior Backend Engineer · Dubai, AE · 9.5 years · redis, java, fastapi, kafka, spring boot, go, postgresql, docker",
+          "country": "AE",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00718@example.com",
+          "profile": "Senior Backend Engineer · New Delhi, IN · 5.5 years · microservices, postgresql, aws, rest apis, java, grpc, redis, go",
+          "country": "IN",
+          "years": 5.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00107@example.com",
+          "profile": "Senior Backend Engineer · Toronto, CA · 8.5 years · redis, spring boot, java, django, docker, grpc, rest apis, go",
+          "country": "CA",
+          "years": 8.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00988@example.com",
+          "profile": "Lead Backend Engineer · Mumbai, IN · 10 years · go, java, spring boot, fastapi, django",
+          "country": "IN",
+          "years": 10.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00947@example.com",
+          "profile": "Senior Backend Engineer · Dubai, AE · 9.5 years · python, aws, microservices, spring boot, grpc, fastapi, kafka",
+          "country": "AE",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00992@example.com",
+          "profile": "Senior Backend Engineer · London, GB · 6 years · go, spring boot, aws, python, django, redis, microservices, grpc, postgresql, kafka",
+          "country": "GB",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00259@example.com",
+          "profile": "Backend Engineer · Hyderabad, IN · 3 years · microservices, kafka, java, spring boot",
+          "country": "IN",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00661@example.com",
+          "profile": "Lead Backend Engineer · Sydney, AU · 14 years · redis, aws, fastapi, spring boot, rest apis, go, java",
+          "country": "AU",
+          "years": 14.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00752@example.com",
+          "profile": "Senior Backend Engineer · San Francisco, US · 8 years · rest apis, fastapi, go, java, docker, django, kafka, python, aws",
+          "country": "US",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00315@example.com",
+          "profile": "Backend Engineer · New York, US · 3.5 years · grpc, java, python, aws, docker, postgresql, microservices, spring boot, fastapi, rest apis",
+          "country": "US",
+          "years": 3.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00348@example.com",
+          "profile": "Backend Engineer · London, GB · 4.5 years · java, postgresql, aws, rest apis, docker, spring boot, django, redis",
+          "country": "GB",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00090@example.com",
+          "profile": "Backend Engineer · Singapore, SG · 4 years · spring boot, rest apis, aws, redis, django, postgresql, docker, fastapi",
+          "country": "SG",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00313@example.com",
+          "profile": "Senior Backend Engineer · Dubai, AE · 7 years · microservices, aws, spring boot, rest apis, fastapi, docker, python",
+          "country": "AE",
+          "years": 7.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00750@example.com",
+          "profile": "Senior Backend Engineer · Pune, IN · 8 years · spring boot, docker, grpc, redis",
+          "country": "IN",
+          "years": 8.0,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "react-frontend-remote",
+      "query": "react typescript frontend developer, remote",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00465@example.com",
+          "profile": "Senior Frontend Engineer · Bengaluru, IN · 6.5 years · typescript, react, vite, accessibility, tailwind, html, css, javascript, graphql, web performance",
+          "country": "IN",
+          "years": 6.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00528@example.com",
+          "profile": "Lead Frontend Engineer · Sydney, AU · 12 years · css, typescript, tailwind, javascript, html, react",
+          "country": "AU",
+          "years": 12.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00051@example.com",
+          "profile": "Senior Frontend Engineer · Singapore, SG · 6 years · react, redux, graphql, vite, typescript, accessibility, javascript, css, next.js",
+          "country": "SG",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00311@example.com",
+          "profile": "Lead Frontend Engineer · Mumbai, IN · 13 years · react, next.js, redux, typescript, accessibility, html, web performance, javascript, css, graphql",
+          "country": "IN",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00547@example.com",
+          "profile": "Frontend Engineer · Dubai, AE · 2.5 years · next.js, typescript, accessibility, react, html, tailwind, javascript, css, vite, graphql",
+          "country": "AE",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00780@example.com",
+          "profile": "Lead Frontend Engineer · Mumbai, IN · 12 years · javascript, typescript, accessibility, react",
+          "country": "IN",
+          "years": 12.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00448@example.com",
+          "profile": "Lead Frontend Engineer · Pune, IN · 14.5 years · typescript, next.js, graphql, tailwind, javascript, css, vite, html, accessibility, redux",
+          "country": "IN",
+          "years": 14.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00669@example.com",
+          "profile": "Lead Frontend Engineer · Amsterdam, NL · 12 years · tailwind, typescript, next.js, react, graphql, javascript, web performance, html, accessibility, redux",
+          "country": "NL",
+          "years": 12.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00054@example.com",
+          "profile": "Senior Frontend Engineer · Berlin, DE · 9.5 years · typescript, web performance, accessibility, html, redux, next.js, css, tailwind, react, graphql",
+          "country": "DE",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00865@example.com",
+          "profile": "Junior Frontend Engineer · Berlin, DE · 1 years · react, typescript, vite, web performance, graphql, accessibility, html, next.js",
+          "country": "DE",
+          "years": 1.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00141@example.com",
+          "profile": "Senior Frontend Engineer · Sydney, AU · 7.5 years · javascript, tailwind, react, web performance, vite, graphql, typescript, accessibility, css",
+          "country": "AU",
+          "years": 7.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00695@example.com",
+          "profile": "Lead Frontend Engineer · New Delhi, IN · 11.5 years · typescript, javascript, html, vite, css, redux, graphql, web performance, next.js",
+          "country": "IN",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00743@example.com",
+          "profile": "Frontend Engineer · Toronto, CA · 3.5 years · next.js, react, javascript, html, typescript, graphql, web performance, accessibility, redux",
+          "country": "CA",
+          "years": 3.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00428@example.com",
+          "profile": "Frontend Engineer · Berlin, DE · 3 years · javascript, react, tailwind, redux, typescript, graphql, vite, css, next.js, accessibility",
+          "country": "DE",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00159@example.com",
+          "profile": "Frontend Engineer · Berlin, DE · 2.5 years · html, graphql, react, typescript, next.js, tailwind, redux, accessibility, vite, web performance",
+          "country": "DE",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00924@example.com",
+          "profile": "Senior Frontend Engineer · Bengaluru, IN · 8 years · react, accessibility, typescript, javascript, html",
+          "country": "IN",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00476@example.com",
+          "profile": "Lead Frontend Engineer · Toronto, CA · 12 years · html, redux, typescript, javascript, react, graphql, tailwind",
+          "country": "CA",
+          "years": 12.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00816@example.com",
+          "profile": "Lead Frontend Engineer · Berlin, DE · 13 years · typescript, react, css, tailwind, accessibility, graphql, javascript, redux, next.js",
+          "country": "DE",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00347@example.com",
+          "profile": "Lead Frontend Engineer · New York, US · 10 years · accessibility, vite, typescript, tailwind, next.js, css, redux, react",
+          "country": "US",
+          "years": 10.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00689@example.com",
+          "profile": "Frontend Engineer · Dubai, AE · 4.5 years · accessibility, web performance, react, typescript, html, graphql",
+          "country": "AE",
+          "years": 4.5,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "devops-lead-delhi",
+      "query": "devops tech lead in delhi",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00097@example.com",
+          "profile": "Lead DevOps Engineer · Toronto, CA · 11.5 years · ansible, gcp, helm, observability, aws, ci/cd, github actions, terraform, docker",
+          "country": "CA",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00375@example.com",
+          "profile": "Lead DevOps Engineer · Dubai, AE · 10.5 years · terraform, aws, observability, linux, gcp",
+          "country": "AE",
+          "years": 10.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00884@example.com",
+          "profile": "Lead DevOps Engineer · Pune, IN · 13.5 years · kubernetes, linux, gcp, docker, ansible, terraform, prometheus, observability, aws, github actions",
+          "country": "IN",
+          "years": 13.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00195@example.com",
+          "profile": "Lead DevOps Engineer · Bengaluru, IN · 11.5 years · docker, ci/cd, prometheus, helm, linux, kubernetes, github actions, ansible, aws",
+          "country": "IN",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00294@example.com",
+          "profile": "Lead DevOps Engineer · Chennai, IN · 11.5 years · gcp, prometheus, ci/cd, docker",
+          "country": "IN",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00928@example.com",
+          "profile": "Lead DevOps Engineer · Dubai, AE · 13.5 years · observability, kubernetes, linux, helm, docker, ci/cd, gcp, github actions",
+          "country": "AE",
+          "years": 13.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00506@example.com",
+          "profile": "Lead DevOps Engineer · New Delhi, IN · 13 years · prometheus, aws, helm, kubernetes, docker, gcp, linux, github actions",
+          "country": "IN",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00473@example.com",
+          "profile": "Lead DevOps Engineer · Sydney, AU · 11.5 years · github actions, linux, helm, observability, terraform, aws",
+          "country": "AU",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00020@example.com",
+          "profile": "Lead DevOps Engineer · Berlin, DE · 10.5 years · gcp, terraform, linux, helm, ci/cd, docker, observability, prometheus, kubernetes",
+          "country": "DE",
+          "years": 10.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00990@example.com",
+          "profile": "Lead DevOps Engineer · New Delhi, IN · 10 years · docker, helm, ansible, kubernetes",
+          "country": "IN",
+          "years": 10.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00234@example.com",
+          "profile": "Lead DevOps Engineer · Pune, IN · 14.5 years · prometheus, terraform, helm, ansible, ci/cd, aws, observability, linux, gcp, kubernetes",
+          "country": "IN",
+          "years": 14.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00119@example.com",
+          "profile": "Lead DevOps Engineer · Singapore, SG · 10.5 years · prometheus, terraform, helm, github actions, aws, ci/cd",
+          "country": "SG",
+          "years": 10.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00340@example.com",
+          "profile": "Lead DevOps Engineer · Toronto, CA · 11 years · prometheus, kubernetes, ci/cd, github actions, aws",
+          "country": "CA",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00299@example.com",
+          "profile": "Lead DevOps Engineer · Mumbai, IN · 12.5 years · ansible, aws, prometheus, helm, github actions",
+          "country": "IN",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00970@example.com",
+          "profile": "Senior DevOps Engineer · New Delhi, IN · 8 years · observability, linux, gcp, kubernetes, github actions, prometheus, ansible, helm",
+          "country": "IN",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00534@example.com",
+          "profile": "Lead DevOps Engineer · Hyderabad, IN · 12.5 years · terraform, ansible, prometheus, gcp, aws",
+          "country": "IN",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00799@example.com",
+          "profile": "Lead DevOps Engineer · Dubai, AE · 13 years · aws, terraform, kubernetes, observability, linux, github actions",
+          "country": "AE",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00277@example.com",
+          "profile": "Lead DevOps Engineer · Toronto, CA · 14 years · gcp, kubernetes, github actions, ansible, observability, helm, prometheus, terraform",
+          "country": "CA",
+          "years": 14.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00059@example.com",
+          "profile": "Lead DevOps Engineer · New Delhi, IN · 15 years · gcp, kubernetes, ci/cd, terraform, helm, linux",
+          "country": "IN",
+          "years": 15.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00291@example.com",
+          "profile": "Lead DevOps Engineer · Sydney, AU · 14.5 years · github actions, observability, ci/cd, prometheus, aws, docker, terraform, ansible, kubernetes, linux",
+          "country": "AU",
+          "years": 14.5,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "ml-engineer-nlp",
+      "query": "machine learning engineer with nlp and pytorch experience",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00064@example.com",
+          "profile": "Machine Learning Engineer · Amsterdam, NL · 4.5 years · vector databases, nlp, tensorflow, computer vision, llms, scikit-learn, python, kubernetes",
+          "country": "NL",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00746@example.com",
+          "profile": "Lead Machine Learning Engineer · Amsterdam, NL · 10 years · nlp, vector databases, scikit-learn, mlops, kubernetes, llms, pytorch",
+          "country": "NL",
+          "years": 10.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00726@example.com",
+          "profile": "Machine Learning Engineer · Austin, US · 4 years · pytorch, nlp, vector databases, docker, tensorflow, scikit-learn, kubernetes",
+          "country": "US",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00549@example.com",
+          "profile": "Machine Learning Engineer · Chennai, IN · 2 years · kubernetes, scikit-learn, pytorch, vector databases, hugging face, docker, tensorflow, nlp",
+          "country": "IN",
+          "years": 2.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00707@example.com",
+          "profile": "Lead Machine Learning Engineer · London, GB · 13 years · nlp, pytorch, tensorflow, hugging face, kubernetes, python, docker, mlops, computer vision",
+          "country": "GB",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00821@example.com",
+          "profile": "Lead Machine Learning Engineer · New York, US · 10.5 years · hugging face, kubernetes, python, tensorflow, docker, mlops, nlp, computer vision, scikit-learn, pytorch",
+          "country": "US",
+          "years": 10.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00701@example.com",
+          "profile": "Senior Machine Learning Engineer · London, GB · 6 years · pytorch, scikit-learn, llms, tensorflow, nlp, kubernetes, hugging face, docker, computer vision, mlops",
+          "country": "GB",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00369@example.com",
+          "profile": "Senior Machine Learning Engineer · Mumbai, IN · 7 years · pytorch, nlp, tensorflow, mlops, computer vision, kubernetes, hugging face, llms",
+          "country": "IN",
+          "years": 7.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00211@example.com",
+          "profile": "Senior Machine Learning Engineer · Chennai, IN · 5 years · python, pytorch, nlp, tensorflow",
+          "country": "IN",
+          "years": 5.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00171@example.com",
+          "profile": "Senior Machine Learning Engineer · Bengaluru, IN · 9 years · nlp, mlops, scikit-learn, python, docker, hugging face, vector databases, computer vision",
+          "country": "IN",
+          "years": 9.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00399@example.com",
+          "profile": "Machine Learning Engineer · Dubai, AE · 3 years · scikit-learn, nlp, mlops, python, kubernetes, docker, pytorch, hugging face, computer vision, vector databases",
+          "country": "AE",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00397@example.com",
+          "profile": "Lead Machine Learning Engineer · New York, US · 12.5 years · nlp, hugging face, scikit-learn, python, vector databases, docker, computer vision, llms, pytorch, kubernetes",
+          "country": "US",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00078@example.com",
+          "profile": "Lead Machine Learning Engineer · London, GB · 14 years · mlops, tensorflow, pytorch, scikit-learn, docker, python, llms, vector databases, kubernetes",
+          "country": "GB",
+          "years": 14.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00631@example.com",
+          "profile": "Senior Machine Learning Engineer · London, GB · 8 years · nlp, kubernetes, pytorch, scikit-learn, vector databases, hugging face, tensorflow",
+          "country": "GB",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00588@example.com",
+          "profile": "Lead Machine Learning Engineer · London, GB · 13 years · scikit-learn, nlp, mlops, tensorflow, pytorch",
+          "country": "GB",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00671@example.com",
+          "profile": "Senior Machine Learning Engineer · London, GB · 9.5 years · nlp, python, pytorch, docker",
+          "country": "GB",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00029@example.com",
+          "profile": "Junior Machine Learning Engineer · Dubai, AE · 1.5 years · pytorch, docker, nlp, scikit-learn, kubernetes",
+          "country": "AE",
+          "years": 1.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00769@example.com",
+          "profile": "Machine Learning Engineer · Chennai, IN · 4 years · mlops, scikit-learn, kubernetes, vector databases, nlp, tensorflow, python",
+          "country": "IN",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00586@example.com",
+          "profile": "Machine Learning Engineer · London, GB · 3.5 years · scikit-learn, nlp, kubernetes, computer vision, python, llms",
+          "country": "GB",
+          "years": 3.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00220@example.com",
+          "profile": "Lead Machine Learning Engineer · New York, US · 11.5 years · kubernetes, tensorflow, docker, pytorch, nlp, computer vision, llms, python",
+          "country": "US",
+          "years": 11.5,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "data-engineer-spark",
+      "query": "data engineer with spark, airflow and kafka",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00131@example.com",
+          "profile": "Lead Data Engineer · London, GB · 12.5 years · python, spark, sql, etl, kafka, snowflake, dbt, airflow",
+          "country": "GB",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00685@example.com",
+          "profile": "Data Engineer · Mumbai, IN · 4 years · sql, spark, dbt, bigquery, snowflake, python, aws, kafka, etl, airflow",
+          "country": "IN",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00016@example.com",
+          "profile": "Data Engineer · New York, US · 4 years · snowflake, python, aws, etl, airflow, spark, bigquery, data modeling, databricks",
+          "country": "US",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00317@example.com",
+          "profile": "Senior Data Engineer · Chennai, IN · 9.5 years · kafka, python, data modeling, airflow, aws, spark, sql, databricks, snowflake, bigquery",
+          "country": "IN",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00118@example.com",
+          "profile": "Lead Data Engineer · Bengaluru, IN · 11 years · airflow, spark, python, snowflake, etl, sql, dbt, data modeling",
+          "country": "IN",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00274@example.com",
+          "profile": "Data Engineer · Singapore, SG · 4 years · dbt, data modeling, kafka, sql, airflow, snowflake, bigquery",
+          "country": "SG",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00117@example.com",
+          "profile": "Senior Data Engineer · Hyderabad, IN · 5 years · databricks, kafka, dbt, sql, data modeling, python, etl",
+          "country": "IN",
+          "years": 5.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00252@example.com",
+          "profile": "Senior Data Engineer · London, GB · 6.5 years · kafka, python, etl, airflow",
+          "country": "GB",
+          "years": 6.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00120@example.com",
+          "profile": "Data Engineer · San Francisco, US · 2 years · etl, sql, spark, data modeling, databricks, airflow, snowflake, bigquery, kafka, python",
+          "country": "US",
+          "years": 2.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00590@example.com",
+          "profile": "Lead Data Engineer · Hyderabad, IN · 13 years · kafka, etl, dbt, bigquery, airflow, aws, sql, python, databricks, data modeling",
+          "country": "IN",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00674@example.com",
+          "profile": "Lead Data Engineer · Austin, US · 13.5 years · data modeling, kafka, airflow, aws, etl, spark",
+          "country": "US",
+          "years": 13.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00987@example.com",
+          "profile": "Data Engineer · Amsterdam, NL · 4.5 years · kafka, spark, aws, sql, dbt, data modeling, airflow, bigquery",
+          "country": "NL",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00218@example.com",
+          "profile": "Senior Data Engineer · New York, US · 8 years · kafka, dbt, spark, data modeling, airflow, sql, python, etl",
+          "country": "US",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00860@example.com",
+          "profile": "Data Engineer · Singapore, SG · 2 years · databricks, airflow, kafka, data modeling",
+          "country": "SG",
+          "years": 2.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00581@example.com",
+          "profile": "Data Engineer · Dubai, AE · 3 years · data modeling, kafka, spark, bigquery, databricks, sql, airflow, aws, etl, dbt",
+          "country": "AE",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00611@example.com",
+          "profile": "Data Engineer · New Delhi, IN · 4.5 years · snowflake, dbt, python, sql, etl, spark, kafka, aws, databricks, data modeling",
+          "country": "IN",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00995@example.com",
+          "profile": "Data Engineer · Hyderabad, IN · 3 years · airflow, bigquery, etl, data modeling, sql, dbt, python, kafka",
+          "country": "IN",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00194@example.com",
+          "profile": "Data Engineer · Dubai, AE · 3 years · airflow, etl, spark, aws, snowflake, kafka, python, dbt, data modeling",
+          "country": "AE",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00777@example.com",
+          "profile": "Lead Data Engineer · Hyderabad, IN · 13.5 years · spark, dbt, kafka, airflow",
+          "country": "IN",
+          "years": 13.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00966@example.com",
+          "profile": "Senior Data Engineer · London, GB · 9.5 years · spark, aws, snowflake, sql, airflow, data modeling",
+          "country": "GB",
+          "years": 9.5,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "junior-qa-automation",
+      "query": "junior qa automation engineer with selenium",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00183@example.com",
+          "profile": "Junior QA Engineer · London, GB · 1 years · api testing, manual testing, playwright, selenium, cypress, python, jmeter, ci/cd, test automation, java",
+          "country": "GB",
+          "years": 1.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00179@example.com",
+          "profile": "Senior QA Engineer · Chennai, IN · 7 years · selenium, ci/cd, test automation, jmeter, python, manual testing, cypress, playwright, api testing",
+          "country": "IN",
+          "years": 7.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00861@example.com",
+          "profile": "Lead QA Engineer · Bengaluru, IN · 15 years · test automation, cypress, selenium, java, manual testing, api testing, playwright, ci/cd",
+          "country": "IN",
+          "years": 15.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00795@example.com",
+          "profile": "Junior QA Engineer · Dubai, AE · 1.5 years · python, test automation, playwright, ci/cd, jmeter, manual testing, api testing, java, selenium",
+          "country": "AE",
+          "years": 1.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00909@example.com",
+          "profile": "Senior QA Engineer · Sydney, AU · 6 years · test automation, java, playwright, selenium, manual testing",
+          "country": "AU",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00160@example.com",
+          "profile": "Junior QA Engineer · Mumbai, IN · 1 years · test automation, python, api testing, ci/cd, jmeter, java, manual testing, playwright, selenium, cypress",
+          "country": "IN",
+          "years": 1.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00623@example.com",
+          "profile": "QA Engineer · Bengaluru, IN · 2.5 years · selenium, jmeter, test automation, api testing, manual testing, cypress, ci/cd, java, python, playwright",
+          "country": "IN",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00828@example.com",
+          "profile": "Lead QA Engineer · Chennai, IN · 12 years · selenium, manual testing, jmeter, ci/cd, java, test automation, python, api testing",
+          "country": "IN",
+          "years": 12.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00650@example.com",
+          "profile": "QA Engineer · Pune, IN · 3 years · test automation, java, selenium, jmeter",
+          "country": "IN",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00310@example.com",
+          "profile": "Lead QA Engineer · Bengaluru, IN · 11 years · test automation, selenium, python, java, jmeter, ci/cd",
+          "country": "IN",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00832@example.com",
+          "profile": "QA Engineer · Mumbai, IN · 4 years · python, selenium, test automation, jmeter, java, ci/cd, manual testing",
+          "country": "IN",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00227@example.com",
+          "profile": "Junior QA Engineer · New Delhi, IN · 1 years · python, ci/cd, cypress, manual testing, jmeter, java, api testing, selenium, test automation, playwright",
+          "country": "IN",
+          "years": 1.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00708@example.com",
+          "profile": "Senior QA Engineer · Toronto, CA · 5 years · java, python, selenium, jmeter, ci/cd, test automation",
+          "country": "CA",
+          "years": 5.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00199@example.com",
+          "profile": "Senior QA Engineer · Mumbai, IN · 9 years · manual testing, test automation, ci/cd, selenium, cypress, jmeter, java, python, api testing",
+          "country": "IN",
+          "years": 9.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00280@example.com",
+          "profile": "Senior QA Engineer · San Francisco, US · 6.5 years · playwright, java, selenium, ci/cd, test automation, cypress",
+          "country": "US",
+          "years": 6.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00558@example.com",
+          "profile": "Senior QA Engineer · New York, US · 7 years · java, api testing, selenium, ci/cd, test automation",
+          "country": "US",
+          "years": 7.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00477@example.com",
+          "profile": "QA Engineer · Hyderabad, IN · 4 years · java, api testing, selenium, test automation, cypress, ci/cd",
+          "country": "IN",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00570@example.com",
+          "profile": "Senior QA Engineer · Toronto, CA · 9.5 years · test automation, selenium, manual testing, jmeter, cypress, api testing, playwright, python, java, ci/cd",
+          "country": "CA",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00305@example.com",
+          "profile": "Senior QA Engineer · London, GB · 6 years · selenium, api testing, test automation, ci/cd, cypress, python, manual testing",
+          "country": "GB",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00004@example.com",
+          "profile": "Senior QA Engineer · Toronto, CA · 7.5 years · selenium, playwright, cypress, java, manual testing, test automation, ci/cd, api testing, jmeter, python",
+          "country": "CA",
+          "years": 7.5,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "mobile-flutter-dubai",
+      "query": "flutter mobile developer in dubai",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00312@example.com",
+          "profile": "Lead Mobile Developer · Hyderabad, IN · 11.5 years · mobile ui, swift, kotlin, firebase, flutter, ios, app store deployment, react native, android",
+          "country": "IN",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00694@example.com",
+          "profile": "Lead Mobile Developer · Dubai, AE · 14 years · app store deployment, ios, react native, mobile ui, firebase, android",
+          "country": "AE",
+          "years": 14.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00683@example.com",
+          "profile": "Mobile Developer · Amsterdam, NL · 4 years · kotlin, mobile ui, flutter, firebase, app store deployment",
+          "country": "NL",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00066@example.com",
+          "profile": "Mobile Developer · Dubai, AE · 3 years · react native, mobile ui, swift, kotlin, firebase, flutter, app store deployment, ios",
+          "country": "AE",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00569@example.com",
+          "profile": "Mobile Developer · Mumbai, IN · 2 years · flutter, firebase, react native, app store deployment, ios, swift, android, mobile ui, kotlin",
+          "country": "IN",
+          "years": 2.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00998@example.com",
+          "profile": "Senior Mobile Developer · Mumbai, IN · 8 years · swift, kotlin, app store deployment, firebase, flutter, mobile ui, android",
+          "country": "IN",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00321@example.com",
+          "profile": "Senior Mobile Developer · Sydney, AU · 7.5 years · firebase, mobile ui, ios, app store deployment, flutter, android",
+          "country": "AU",
+          "years": 7.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00667@example.com",
+          "profile": "Senior Mobile Developer · Singapore, SG · 8.5 years · android, mobile ui, kotlin, app store deployment, flutter, swift, firebase, ios",
+          "country": "SG",
+          "years": 8.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00324@example.com",
+          "profile": "Lead Mobile Developer · New York, US · 12 years · flutter, ios, mobile ui, firebase, app store deployment, android",
+          "country": "US",
+          "years": 12.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00445@example.com",
+          "profile": "Lead Mobile Developer · Bengaluru, IN · 13.5 years · mobile ui, firebase, android, ios, swift, react native, app store deployment, kotlin, flutter",
+          "country": "IN",
+          "years": 13.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00622@example.com",
+          "profile": "Senior Mobile Developer · San Francisco, US · 6 years · swift, app store deployment, flutter, react native, ios, mobile ui, kotlin, android, firebase",
+          "country": "US",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00651@example.com",
+          "profile": "Senior Mobile Developer · Dubai, AE · 9.5 years · android, kotlin, flutter, app store deployment, swift, firebase, react native, mobile ui, ios",
+          "country": "AE",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00283@example.com",
+          "profile": "Lead Mobile Developer · New York, US · 12.5 years · mobile ui, app store deployment, flutter, android, react native, kotlin, swift, ios, firebase",
+          "country": "US",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00335@example.com",
+          "profile": "Mobile Developer · Dubai, AE · 4.5 years · firebase, ios, flutter, kotlin, swift",
+          "country": "AE",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00804@example.com",
+          "profile": "Lead Mobile Developer · Mumbai, IN · 12.5 years · react native, flutter, mobile ui, android, swift",
+          "country": "IN",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00657@example.com",
+          "profile": "Lead Mobile Developer · Mumbai, IN · 14.5 years · mobile ui, firebase, ios, flutter",
+          "country": "IN",
+          "years": 14.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00885@example.com",
+          "profile": "Mobile Developer · Toronto, CA · 2.5 years · flutter, firebase, mobile ui, android, swift, ios",
+          "country": "CA",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00240@example.com",
+          "profile": "Mobile Developer · Dubai, AE · 2.5 years · kotlin, app store deployment, flutter, android, firebase, swift, ios, react native, mobile ui",
+          "country": "AE",
+          "years": 2.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00130@example.com",
+          "profile": "Mobile Developer · Pune, IN · 3 years · ios, android, flutter, mobile ui",
+          "country": "IN",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00495@example.com",
+          "profile": "Lead Mobile Developer · Dubai, AE · 14 years · flutter, android, mobile ui, firebase, app store deployment, react native",
+          "country": "AE",
+          "years": 14.0,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "product-designer-figma",
+      "query": "product designer with figma and design systems experience",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00732@example.com",
+          "profile": "Product Designer · Berlin, DE · 4 years · wireframing, figma, design systems, prototyping, interaction design, ux research, accessibility, user testing",
+          "country": "DE",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00573@example.com",
+          "profile": "Senior Product Designer · Chennai, IN · 6 years · figma, prototyping, user testing, accessibility, design systems, wireframing, ux research, interaction design",
+          "country": "IN",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00062@example.com",
+          "profile": "Lead Product Designer · Chennai, IN · 11 years · prototyping, figma, accessibility, user testing, wireframing, design systems",
+          "country": "IN",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00982@example.com",
+          "profile": "Lead Product Designer · Dubai, AE · 14.5 years · design systems, figma, interaction design, prototyping, wireframing, user testing, ux research, accessibility",
+          "country": "AE",
+          "years": 14.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00101@example.com",
+          "profile": "Lead Product Designer · London, GB · 15 years · wireframing, interaction design, design systems, figma, user testing, accessibility, ux research",
+          "country": "GB",
+          "years": 15.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00079@example.com",
+          "profile": "Product Designer · Singapore, SG · 3.5 years · prototyping, design systems, ux research, figma",
+          "country": "SG",
+          "years": 3.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00765@example.com",
+          "profile": "Senior Product Designer · Mumbai, IN · 9.5 years · design systems, figma, ux research, interaction design, wireframing",
+          "country": "IN",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00421@example.com",
+          "profile": "Lead Product Designer · Dubai, AE · 13 years · interaction design, ux research, design systems, figma",
+          "country": "AE",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00209@example.com",
+          "profile": "Lead Product Designer · Chennai, IN · 14 years · interaction design, figma, ux research, prototyping, wireframing, accessibility, user testing",
+          "country": "IN",
+          "years": 14.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00167@example.com",
+          "profile": "Senior Product Designer · Toronto, CA · 8 years · interaction design, wireframing, design systems, prototyping, figma",
+          "country": "CA",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00095@example.com",
+          "profile": "Senior Product Designer · San Francisco, US · 6 years · figma, wireframing, prototyping, design systems, user testing, accessibility",
+          "country": "US",
+          "years": 6.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00058@example.com",
+          "profile": "Product Designer · Mumbai, IN · 2 years · figma, wireframing, design systems, prototyping, accessibility, user testing",
+          "country": "IN",
+          "years": 2.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00889@example.com",
+          "profile": "Senior Product Designer · Bengaluru, IN · 7.5 years · figma, design systems, interaction design, wireframing, ux research",
+          "country": "IN",
+          "years": 7.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00996@example.com",
+          "profile": "Product Designer · New Delhi, IN · 4.5 years · prototyping, ux research, figma, accessibility, user testing, design systems, wireframing",
+          "country": "IN",
+          "years": 4.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00771@example.com",
+          "profile": "Product Designer · Mumbai, IN · 3.5 years · figma, ux research, wireframing, prototyping",
+          "country": "IN",
+          "years": 3.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00903@example.com",
+          "profile": "Lead Product Designer · Singapore, SG · 15 years · prototyping, user testing, wireframing, interaction design, ux research, figma, design systems, accessibility",
+          "country": "SG",
+          "years": 15.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00888@example.com",
+          "profile": "Senior Product Designer · Mumbai, IN · 8.5 years · prototyping, design systems, interaction design, ux research",
+          "country": "IN",
+          "years": 8.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00105@example.com",
+          "profile": "Junior Product Designer · Sydney, AU · 1 years · figma, design systems, ux research, wireframing, interaction design, prototyping",
+          "country": "AU",
+          "years": 1.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00680@example.com",
+          "profile": "Lead Product Designer · Singapore, SG · 11 years · figma, prototyping, user testing, ux research, design systems",
+          "country": "SG",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00338@example.com",
+          "profile": "Lead Product Designer · Austin, US · 11 years · accessibility, figma, design systems, wireframing, interaction design",
+          "country": "US",
+          "years": 11.0,
+          "grade": null
+        }
+      ]
+    },
+    {
+      "id": "fullstack-node-singapore",
+      "query": "full stack engineer node.js and react in singapore, 5+ years",
+      "filters": {
+        "min_years": null,
+        "skill": null,
+        "city": null,
+        "country": null,
+        "source": null,
+        "max_salary": null,
+        "salary_currency": null
+      },
+      "candidates": [
+        {
+          "email": "seed.00044@example.com",
+          "profile": "Senior Full Stack Engineer · Toronto, CA · 8 years · node.js, typescript, react, rest apis, aws, docker, graphql, postgresql, mongodb, express",
+          "country": "CA",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00991@example.com",
+          "profile": "Senior Full Stack Engineer · Austin, US · 5 years · react, aws, python, node.js, typescript, postgresql, mongodb, docker, rest apis, express",
+          "country": "US",
+          "years": 5.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00696@example.com",
+          "profile": "Senior Full Stack Engineer · Singapore, SG · 7.5 years · aws, rest apis, express, postgresql, docker, graphql, node.js, react, typescript",
+          "country": "SG",
+          "years": 7.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00600@example.com",
+          "profile": "Senior Full Stack Engineer · Chennai, IN · 9.5 years · aws, typescript, docker, express, postgresql, node.js, react, rest apis, graphql",
+          "country": "IN",
+          "years": 9.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00625@example.com",
+          "profile": "Senior Full Stack Engineer · Amsterdam, NL · 7 years · node.js, postgresql, react, rest apis",
+          "country": "NL",
+          "years": 7.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00788@example.com",
+          "profile": "Lead Full Stack Engineer · Sydney, AU · 12.5 years · react, rest apis, mongodb, node.js, python, aws, express, postgresql, docker",
+          "country": "AU",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00552@example.com",
+          "profile": "Senior Full Stack Engineer · New Delhi, IN · 9 years · express, typescript, react, mongodb, rest apis",
+          "country": "IN",
+          "years": 9.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00031@example.com",
+          "profile": "Lead Full Stack Engineer · Dubai, AE · 13.5 years · node.js, typescript, react, rest apis, mongodb, docker, python, postgresql, graphql, aws",
+          "country": "AE",
+          "years": 13.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00965@example.com",
+          "profile": "Lead Full Stack Engineer · New Delhi, IN · 13 years · react, rest apis, postgresql, express, mongodb, python",
+          "country": "IN",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00722@example.com",
+          "profile": "Lead Full Stack Engineer · Singapore, SG · 12.5 years · docker, react, graphql, aws, rest apis, postgresql",
+          "country": "SG",
+          "years": 12.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00565@example.com",
+          "profile": "Full Stack Engineer · Dubai, AE · 4 years · express, typescript, react, docker, graphql, aws, postgresql, python, node.js, rest apis",
+          "country": "AE",
+          "years": 4.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00080@example.com",
+          "profile": "Lead Full Stack Engineer · Singapore, SG · 11 years · python, node.js, react, postgresql, mongodb, graphql, rest apis, typescript, aws",
+          "country": "SG",
+          "years": 11.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00655@example.com",
+          "profile": "Lead Full Stack Engineer · Mumbai, IN · 13 years · react, node.js, mongodb, python, docker, rest apis",
+          "country": "IN",
+          "years": 13.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00803@example.com",
+          "profile": "Full Stack Engineer · Sydney, AU · 3 years · node.js, typescript, react, postgresql, graphql, mongodb, rest apis, express, aws, docker",
+          "country": "AU",
+          "years": 3.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00609@example.com",
+          "profile": "Senior Full Stack Engineer · Singapore, SG · 8 years · aws, express, docker, postgresql, react, node.js, graphql, python, mongodb",
+          "country": "SG",
+          "years": 8.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00744@example.com",
+          "profile": "Lead Full Stack Engineer · Singapore, SG · 15 years · mongodb, typescript, docker, python",
+          "country": "SG",
+          "years": 15.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00295@example.com",
+          "profile": "Lead Full Stack Engineer · Singapore, SG · 11.5 years · aws, typescript, graphql, postgresql, node.js, express, rest apis, docker, react",
+          "country": "SG",
+          "years": 11.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00376@example.com",
+          "profile": "Full Stack Engineer · Mumbai, IN · 3.5 years · python, node.js, react, aws",
+          "country": "IN",
+          "years": 3.5,
+          "grade": null
+        },
+        {
+          "email": "seed.00185@example.com",
+          "profile": "Senior Full Stack Engineer · Austin, US · 5 years · aws, react, docker, rest apis, node.js, graphql, express",
+          "country": "US",
+          "years": 5.0,
+          "grade": null
+        },
+        {
+          "email": "seed.00384@example.com",
+          "profile": "Full Stack Engineer · Singapore, SG · 4 years · aws, mongodb, node.js, express",
+          "country": "SG",
+          "years": 4.0,
+          "grade": null
+        }
+      ]
+    }
+  ]
+}

@@ -94,7 +94,7 @@ Nothing is "queued" for embedding. The new candidate simply has no vector yet, s
 The public form and **Add candidate** both start with an optional Resume section (`ResumeUpload`).
 
 ```
-browser: choose a file (≤ 10 MB, PDF / DOC / DOCX / TXT)
+browser: choose a file (≤ 4 MB, PDF / DOC / DOCX / TXT)
   └─ POST /api/v1/resumes   raw file as the body
        resumes.service.read_new_resume
          ├─ resume_ref = new UUID
@@ -394,5 +394,7 @@ The star on a row, card or profile calls `PUT /api/v1/admin/candidates/{id}/book
 | `create-admin --email ... --name ... [--role recruiter] [--password-stdin]` | Creates a staff account. Asks for the password twice, or reads it from stdin (stripping a Windows BOM and `\r\n`). |
 | `embed-backfill` | Embeds everything stale (jobs, then candidates) and exits. Needs no running server. |
 | `maintenance [--once]` | Runs the background tasks outside the API. `--once` runs each task once and exits non-zero on failure. |
+| `eval-label --id ... --query "..." [--count 20]` | Adds a search to `evals/golden_set.json` with the best hybrid matches (synthetic only, shuffled, ungraded) for a person to grade. |
+| `eval-search` | Scores every graded search for real (about $0.05 each) and writes a `.json` and `.md` report to `evals/results/`. See [backend/evals/README.md](../../backend/evals/README.md). |
 
 Next: [04-backend-core.md](04-backend-core.md).

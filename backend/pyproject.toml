@@ -19,6 +19,11 @@ dependencies = [
     # Pinned exactly: 3.31.0 is the last release that has had time to settle (3.41.0 was 1 day old).
     "openai==3.31.0",
     "httpx2==2.16.0",
+    # Formatted resume PDFs in S3-compatible storage (Neon object storage). No S3 client was
+    # installed, and hand-signing SigV4 requests over httpx2 would be more code to get wrong.
+    # Pinned: botocore publishes daily; this one has had weeks to settle.
+    "boto3==1.43.100",
+    "botocore==1.43.100",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +44,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
+[tool.vercel]
+# Vercel runs the FastAPI `app` from app/main.py (backend/ is the Vercel project root).
+entrypoint = "app.main:app"
+
+[tool.vercel.fastapi.static]
+# The app has middleware, which would keep the frontend files in the function; they are public
+# build output with nothing to protect, so serve them from the CDN.
+cdn = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
@@ -56,6 +70,11 @@ select = ["E", "W", "F", "I", "B", "UP", "N", "S", "ASYNC", "SIM", "RUF", "PTH",
 strict = true
 python_version = "3.13"
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# boto3 ships no type hints; core/storage.py wraps it in typed functions.
+module = ["boto3", "botocore.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
