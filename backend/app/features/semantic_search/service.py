@@ -5,6 +5,7 @@ here. The text is never logged or audited. Hard filters are applied after the ra
 """
 
 import asyncio
+import re
 import uuid
 from typing import Literal
 
@@ -41,7 +42,7 @@ from app.features.semantic_search.schemas import (
 )
 from app.shared.aliases import city_spellings, skill_spellings
 from app.shared.redaction import contains_phone_number
-from app.shared.validation import split_tags
+from app.shared.validation import country_name, split_tags
 
 logger = structlog.get_logger(__name__)
 
@@ -119,8 +120,19 @@ async def _rank_with_llm(
     key = ranking.cache_key(ranking.RANK_MODEL, query, pool)
     answer = ranking.cached_answer(key)
     if answer is not None:
-        await progress.done("ranking", "Reused the AI ranking from the last 10 minutes")
+        await progress.done("ranking", "Same search as earlier, ready instantly")
     else:
+        counter = JudgementCounter()
+
+        async def report(text: str) -> None:
+            # Every PROGRESS_STEP profiles and at the last one, not an event per token.
+            before, now = counter.count, counter.update(text)
+            if now // PROGRESS_STEP > before // PROGRESS_STEP or now >= len(pool) > before:
+                done = min(now, len(pool))
+                await progress.count(
+                    "ranking", done, len(pool), f"Read {done} of {_profiles(len(pool))}"
+                )
+
         try:
             client = get_llm_client()
             result = await ai_usage.metered_call(
@@ -136,6 +148,7 @@ async def _rank_with_llm(
                     content=content,
                     schema=ranking.RankingAnswer,
                     max_output_tokens=ranking.MAX_OUTPUT_TOKENS,
+                    on_text=report if progress.listening else None,
                 ),
                 tokens_of=lambda r: (r.input_tokens, r.output_tokens),
             )
@@ -151,6 +164,52 @@ async def _rank_with_llm(
 
 def _profiles(count: int) -> str:
     return f"{count} profile{'' if count == 1 else 's'}"
+
+
+# How often the page hears how many profiles the AI has judged.
+PROGRESS_STEP = 10
+_JUDGEMENT_KEY = re.compile(r'"candidate"\s*:')
+# Longer than the key with any spacing, so a key split across two pieces of text is still found.
+_KEY_OVERLAP = 32
+
+
+class JudgementCounter:
+    """Counts the judgements in the AI's answer as it streams in, scanning only new text: the
+    answer grows to about 30,000 characters over thousands of pieces."""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self._scan_from = 0
+
+    def update(self, text: str) -> int:
+        matches = list(_JUDGEMENT_KEY.finditer(text, self._scan_from))
+        self.count += len(matches)
+        edge = max(self._scan_from, len(text) - _KEY_OVERLAP)
+        self._scan_from = max(matches[-1].end(), edge) if matches else edge
+        return self.count
+
+
+def _understood_words(understood: HardFilters | None) -> str | None:
+    """What was read from the search, said back in a recruiter's words; None if nothing."""
+    if understood is None:
+        return None
+    place = ", ".join(
+        part
+        for part in (
+            understood.city.title() if understood.city else None,
+            country_name(understood.country) if understood.country else None,
+        )
+        if part
+    )
+    years = understood.min_years
+    years_words = f"{years.normalize():f}+ years" if years is not None else None
+    if place and years_words:
+        return f"Looking first in {place}, {years_words}"
+    if place:
+        return f"Looking first in {place}"
+    if years_words:
+        return f"Looking first at people with {years_words}"
+    return None
 
 
 async def _embed_query(
@@ -206,7 +265,7 @@ async def search_by_meaning(
     await progress.start("embedding", "Working out what you're looking for")
     vector = await _embed_query(session, provider, params.q)
     understood = await understanding.understand_query(session, params.q)
-    await progress.done("embedding", "Request understood")
+    await progress.done("embedding", _understood_words(understood) or "Request understood")
     result = await _find_rank_and_filter(
         session,
         vector=vector,
@@ -405,6 +464,7 @@ async def _find_rank_and_filter(
         return SemanticSearchResult(
             items=items[:limit],
             filtered_out=filtered_out[:FILTERED_OUT_SIZE],
+            checked=len(pool),
             ranked_by=ranked_by,
             embedding_model=embedding_model,
             ranking_model=ranking.RANK_MODEL if ai else None,

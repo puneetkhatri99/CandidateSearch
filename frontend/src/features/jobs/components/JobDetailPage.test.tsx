@@ -77,7 +77,8 @@ describe('JobDetailPage', () => {
     ranked_by: 'ai',
     embedding_model: 'text-embedding-3-small',
     ranking_model: 'gpt-5.4-mini',
-    prompt_version: 'rank_v2',
+    prompt_version: 'rank_v5',
+    checked: 42,
     items: [
       {
         candidate: candidateSummary(),
@@ -119,6 +120,7 @@ describe('JobDetailPage', () => {
     const removed = screen.getByRole('list', { name: 'Search matches removed by a filter' })
     expect(within(removed).getByText('Fails filter: City')).toBeInTheDocument()
     expect(within(perfect).getByText(/80,000/)).toBeInTheDocument()
+    expect(screen.getByText('Checked 42 profiles, 1 meet every requirement')).toBeInTheDocument()
     expect(matchCalls()).toHaveLength(1)
   })
 

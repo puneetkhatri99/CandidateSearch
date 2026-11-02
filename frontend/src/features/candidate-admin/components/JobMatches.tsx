@@ -44,9 +44,10 @@ export function JobMatches({ jobId, jobContentKey, ready }: JobMatchesProps) {
         <p className="text-fg-muted">No candidates found for this job yet.</p>
       ) : (
         <>
-          {results.ranked_by === 'search' && (
-            <p className="text-sm text-fg-muted">AI ranking unavailable, so these are in search order.</p>
-          )}
+          <p className="num text-sm text-fg-muted">
+            Checked {results.checked} profiles, {results.items.length} meet every requirement
+            {results.ranked_by === 'search' && '. AI ranking unavailable, so these are in search order'}
+          </p>
           <MatchResults result={results} filtered />
         </>
       )}

@@ -134,9 +134,10 @@ describe('CandidateSearchPage', () => {
           ranked_by: 'ai',
           embedding_model: 'text-embedding-3-small',
           ranking_model: 'gpt-5.4-mini',
-          prompt_version: 'rank_v3',
+          prompt_version: 'rank_v5',
           items: [],
           filtered_out: [],
+          checked: 100,
           ...overrides,
         },
       ],
@@ -191,7 +192,8 @@ describe('CandidateSearchPage', () => {
     // The email stays on the profile; a result is about why the person fits.
     expect(card).not.toHaveTextContent('asha@example.com')
     expect(screen.getByText(/Ranked by AI/)).toBeInTheDocument()
-    expect(screen.getByText('Top 1 candidate, best match first')).toBeInTheDocument()
+    // How much work went into the list, as the one finding line.
+    expect(screen.getByText('Checked 100 profiles, best 1 shown')).toBeInTheDocument()
     // No filters, so no split into sections.
     expect(screen.queryByRole('heading', { name: 'Filtered out' })).not.toBeInTheDocument()
     expect(meaningCalls(fetchMock)[0]?.searchParams.get('q')).toBe('payments backend engineer')
@@ -222,7 +224,7 @@ describe('CandidateSearchPage', () => {
     expect(within(perfect).getByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
     expect(within(removed).getByRole('link', { name: 'Ravi Kumar' })).toBeInTheDocument()
     expect(within(removed).getByText('Fails filter: City, Min years')).toBeInTheDocument()
-    expect(screen.getByText('1 match every filter, 1 filtered out')).toBeInTheDocument()
+    expect(screen.getByText('Checked 100 profiles, 1 meet every filter')).toBeInTheDocument()
     const params = meaningCalls(fetchMock)[0]?.searchParams
     expect([params?.get('city'), params?.get('min_years')]).toEqual(['Pune', '5'])
   })
@@ -329,9 +331,19 @@ describe('CandidateSearchPage', () => {
       vi.fn(async () => {
         const body = new ReadableStream<Uint8Array>({
           async start(controller) {
-            controller.enqueue(event('stage', { stage: 'embedding', state: 'done', detail: 'Search embedded', elapsed_ms: 140 }))
+            controller.enqueue(event('stage', { stage: 'embedding', state: 'done', detail: 'Looking first in Delhi', elapsed_ms: 140 }))
+            controller.enqueue(event('stage', { stage: 'retrieval', state: 'done', detail: 'Found 100 profiles', elapsed_ms: 40 }))
+            controller.enqueue(event('stage', { stage: 'augmentation', state: 'done', detail: null, elapsed_ms: 1 }))
+            controller.enqueue(event('stage', { stage: 'ranking', state: 'started', detail: 'AI is judging each candidate', elapsed_ms: null }))
             controller.enqueue(
-              event('stage', { stage: 'retrieval', state: 'started', detail: 'Searching profiles', elapsed_ms: null }),
+              event('stage', {
+                stage: 'ranking',
+                state: 'progress',
+                detail: 'Read 40 of 100 profiles',
+                elapsed_ms: null,
+                completed: 40,
+                total: 100,
+              }),
             )
             await finished
             controller.enqueue(event('result', JSON.parse(result().stream.split('data: ').at(-1) ?? '{}')))
@@ -344,9 +356,15 @@ describe('CandidateSearchPage', () => {
     renderPage('/admin/candidates?q=python')
 
     const steps = await screen.findByRole('list', { name: 'Search progress' })
-    await waitFor(() => expect(within(steps).getByText('Search embedded')).toBeInTheDocument())
-    expect(within(steps).getByText('Finding likely people').closest('li')).toHaveAttribute('data-status', 'active')
-    expect(within(steps).getByText('Judging each person').closest('li')).toHaveAttribute('data-status', 'waiting')
+    // The real count, as words and as a bar filled to the true share.
+    expect(await screen.findByText('Read 40 of 100 profiles')).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Profiles judged' })).toHaveAttribute('aria-valuenow', '40')
+    expect(within(steps).getByText('Finding likely people').closest('li')).toHaveAttribute('data-status', 'done')
+    expect(within(steps).getByText('Judging each person').closest('li')).toHaveAttribute('data-status', 'active')
+    expect(within(steps).getByText('Checking filters').closest('li')).toHaveAttribute('data-status', 'waiting')
+    // What the finished steps found, said back, and an honest expectation of the wait.
+    expect(screen.getByText('Looking first in Delhi · Found 100 profiles')).toBeInTheDocument()
+    expect(screen.getByText(/Usually takes 20 to 30 seconds/)).toBeInTheDocument()
 
     finish()
 
@@ -367,7 +385,8 @@ describe('CandidateSearchPage', () => {
           embedding_model: 'text-embedding-3-small',
           ranked_by: 'ai',
           ranking_model: 'gpt-5.4-mini',
-          prompt_version: 'rank_v4',
+          prompt_version: 'rank_v5',
+          checked: 100,
           items,
         },
       ])
@@ -399,7 +418,7 @@ describe('CandidateSearchPage', () => {
     finishes[0]?.()
 
     await screen.findByRole('link', { name: 'Asha Verma' })
-    expect(screen.getByText('Top 1 candidate, best match first')).toBeInTheDocument()
+    expect(screen.getByText('Checked 100 profiles, best 1 shown')).toBeInTheDocument()
 
     const box = screen.getByRole('searchbox', { name: /search/i })
     fireEvent.change(box, { target: { value: 'golang' } })

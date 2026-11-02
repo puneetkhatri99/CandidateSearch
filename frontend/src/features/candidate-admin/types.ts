@@ -43,9 +43,12 @@ export type Stage = (typeof STAGES)[number]
 
 export interface StageEvent {
   stage: Stage
-  state: 'started' | 'done'
+  state: 'started' | 'progress' | 'done'
   detail: string | null
   elapsed_ms: number | null
+  /** On "progress": how many of `total` profiles the AI has judged so far. */
+  completed?: number | null
+  total?: number | null
 }
 
 export interface SemanticSearchResult {
@@ -53,6 +56,8 @@ export interface SemanticSearchResult {
   items: SemanticMatch[]
   /** The other search hits, in the same ranked order. */
   filtered_out: SemanticMatch[]
+  /** How many profiles were fetched and ranked before the best were kept. */
+  checked: number
   /** "search": the AI ranking was unavailable, so results are in hybrid-search order. */
   ranked_by: 'ai' | 'search'
   embedding_model: string

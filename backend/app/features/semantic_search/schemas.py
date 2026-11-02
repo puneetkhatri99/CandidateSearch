@@ -72,13 +72,17 @@ Stage = Literal["embedding", "retrieval", "augmentation", "ranking", "filtering"
 
 
 class StageEvent(BaseModel):
-    """One step of a search, streamed so the UI can show what is happening. Never carries the
-    query text or anything about a candidate beyond counts."""
+    """One step of a search, streamed so the UI can show what is happening. Carries counts, and
+    at most the place and years read from the search, shown back to the person who typed it.
+    Never the query text itself, nothing about a candidate, and never logged."""
 
     stage: Stage
-    state: Literal["started", "done"]
+    state: Literal["started", "progress", "done"]
     detail: str | None = None
     elapsed_ms: int | None = None  # set on "done"
+    # Set on "progress": how many of `total` profiles the AI has judged so far.
+    completed: int | None = None
+    total: int | None = None
 
 
 class SemanticSearchResult(BaseModel):
@@ -86,6 +90,8 @@ class SemanticSearchResult(BaseModel):
     # hits, in the same order, so a strong candidate a filter removed is still visible.
     items: list[SemanticMatch]
     filtered_out: list[SemanticMatch]
+    # How many profiles the search fetched and ranked, before the top `limit` were kept.
+    checked: int
     # "ai": ranked by the LLM; "search": the LLM was unavailable, so hybrid-search order.
     ranked_by: Literal["ai", "search"]
     # Models and prompt version behind this answer (RULES §8).

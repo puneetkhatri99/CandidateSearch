@@ -71,9 +71,8 @@ export function CandidateSearchPage() {
             <p aria-live="polite">
               {!searching
                 ? `Showing ${plural(total, 'candidate')}${browse.hasNextPage ? ' (more available)' : ''}`
-                : filtersOn
-                  ? `${perfectCount} match every filter, ${filteredOutCount} filtered out`
-                  : `Top ${plural(total, 'candidate')}, best match first`}
+                : `Checked ${plural(results?.checked ?? 0, 'profile')}, ` +
+                  (filtersOn ? `${perfectCount} meet every filter` : `best ${perfectCount} shown`)}
             </p>
           )
         }

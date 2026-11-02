@@ -291,9 +291,14 @@ event: stage
 data: {"stage":"embedding","state":"started","detail":"Working out what you're looking for"}
 
 event: stage
-data: {"stage":"embedding","state":"done","detail":"Request understood","elapsed_ms":412}
+data: {"stage":"embedding","state":"done","detail":"Looking first in Delhi","elapsed_ms":412}
 
-... retrieval, augmentation, ranking, filtering ...
+... retrieval, augmentation, ranking started ...
+
+event: stage
+data: {"stage":"ranking","state":"progress","detail":"Read 40 of 100 profiles","completed":40,"total":100}
+
+... more counts, ranking done, filtering ...
 
 event: result
 data: { ...the same JSON as the non-stream endpoint... }
@@ -302,7 +307,9 @@ data: { ...the same JSON as the non-stream endpoint... }
 How it works:
 
 - The service functions take an optional `Progress` object (`semantic_search/progress.py`) and call `progress.start(...)` / `progress.done(...)`. Without a listener, those calls do nothing, which is why the plain JSON endpoints share the same code.
-- Stage events carry only counts. Profiles arrive only in the final `result`, so the page lists nobody until the AI has finished (user decision).
+- Stage events carry counts, and the embedding step's detail says back the place and years read from the search ("Looking first in Delhi, 5+ years"), never the search text itself. Profiles arrive only in the final `result`, so the page lists nobody until the AI has finished (user decision).
+- **Live count while the AI judges.** When someone is listening (`Progress.listening`), the ranking call streams the AI's answer (`OpenAIChatClient.parse(on_text=...)`). `JudgementCounter` counts `"candidate":` keys in the text so far, scanning only new text, and a `progress` event goes out every 10 profiles and at the last one. The JSON endpoints don't stream. Streaming asks for `include_usage`, so the call is still priced from its real tokens.
+- `result.checked` is how many profiles were fetched and ranked; the page shows it as "Checked 100 profiles, best 25 shown".
 - `streaming.stream_search` runs the search in its **own asyncio task with its own DB session**. Each stage event is put on an `asyncio.Queue`; the response reads from the queue and yields text.
 - Errors after the response has started can't change the HTTP status (already sent), so they are sent as an `event: error` with `status`, `code` and `message`. Validation and auth errors happen before streaming starts and still come back as normal JSON errors.
 - If the browser disconnects, the task is **not** cancelled. Cancelling a paid call mid-flight would leave its cost unrecorded. `_running` keeps a reference so the task isn't garbage-collected.

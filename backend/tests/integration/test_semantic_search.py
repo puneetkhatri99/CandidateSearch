@@ -100,6 +100,10 @@ class ChatMock:
             await asyncio.sleep(self.understanding_delay_seconds)
             answer = self.facts
         refusal = self.refusal if ranking_call else None
+        if payload.get("stream"):
+            return self._streamed(
+                payload["model"], None if refusal else json.dumps(answer), refusal
+            )
         return httpx2.Response(
             200,
             json={
@@ -121,6 +125,26 @@ class ChatMock:
                 "usage": {"prompt_tokens": 1200, "completion_tokens": 300, "total_tokens": 1500},
             },
         )
+
+    @staticmethod
+    def _streamed(model: str, content: str | None, refusal: str | None) -> httpx2.Response:
+        """The same answer as server-sent chunks, in small pieces, then the usage chunk."""
+
+        def chunk(delta: dict[str, Any], finish: str | None = None) -> dict[str, Any]:
+            choice = {"index": 0, "delta": delta, "finish_reason": finish}
+            return {"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 0,
+                    "model": model, "choices": [choice]}  # fmt: skip
+
+        text = content if content is not None else refusal or ""
+        field_name = "content" if content is not None else "refusal"
+        chunks = [chunk({"role": "assistant", field_name: ""})]
+        chunks += [chunk({field_name: text[i : i + 40]}) for i in range(0, len(text), 40)]
+        chunks.append(chunk({}, "stop"))
+        usage = {"prompt_tokens": 1200, "completion_tokens": 300, "total_tokens": 1500}
+        chunks.append({"id": "chatcmpl-test", "object": "chat.completion.chunk", "created": 0,
+                       "model": model, "choices": [], "usage": usage})  # fmt: skip
+        body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+        return httpx2.Response(200, text=body, headers={"content-type": "text/event-stream"})
 
 
 @pytest.fixture(autouse=True)
@@ -747,20 +771,43 @@ async def test_a_streamed_search_reports_each_stage_then_the_result(
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _sse(response.text)
     stages = [(data["stage"], data["state"]) for name, data in events if name == "stage"]
-    assert stages == [
+    assert [step for step in stages if step[1] != "progress"] == [
         (stage, state)
         for stage in ("embedding", "retrieval", "augmentation", "ranking", "filtering")
         for state in ("started", "done")
     ]
+    # The AI's answer is streamed and counted: one count at the last profile, inside ranking.
+    counts = [d for n, d in events if n == "stage" and d["state"] == "progress"]
+    assert [(c["stage"], c["completed"], c["total"], c["detail"]) for c in counts] == [
+        ("ranking", 2, 2, "Read 2 of 2 profiles")
+    ]
+    assert stages.index(("ranking", "progress")) == stages.index(("ranking", "started")) + 1
     details = {d["stage"]: d["detail"] for n, d in events if n == "stage" and d["state"] == "done"}
     assert details["retrieval"] == "Found 2 profiles, 2 meeting every filter"
     assert details["ranking"] == "Every profile judged"
     assert all(d["elapsed_ms"] >= 0 for n, d in events if n == "stage" and d["state"] == "done")
     name, result = events[-1]
     assert name == "result"
-    assert len(result["items"]) == 2
+    assert (len(result["items"]), result["checked"], result["ranked_by"]) == (2, 2, "ai")
+    [event] = await _events("search_rank")
+    # Streaming still records the tokens, so the call is priced like a plain one.
+    assert (event.input_tokens, event.output_tokens) == (1200, 300)
     # The query text is never echoed in the progress.
     assert "payments" not in json.dumps([d for n, d in events if n == "stage"])
+
+
+async def test_a_streamed_search_says_back_the_place_and_years_it_read(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    await _seed_embedded(1)
+    chat_mock.facts = {"city": "new delhi", "country_code": "IN", "min_years": 5}
+
+    events = _sse((await admin_client.get(f"{URL}/stream", params={"q": QUERY})).text)
+
+    [understood] = [
+        d for n, d in events if n == "stage" and d["stage"] == "embedding" and d["state"] == "done"
+    ]
+    assert understood["detail"] == "Looking first in New Delhi, India, 5+ years"
 
 
 async def test_a_streamed_search_sends_profiles_only_in_the_final_result(

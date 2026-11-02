@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+import { Meter } from '@/shared/ui'
 import { STAGES, type Stage, type StageEvent } from '../types'
 
 const LABELS: Record<Stage, string> = {
@@ -15,6 +17,8 @@ const WAITING: Record<Stage, string> = {
   ranking: 'Weighs skills, location, pay and experience',
   filtering: 'Separates who meets every requirement',
 }
+// Measured on real searches of about 1,000 profiles (docs/LEARNINGS.md, 2026-11-02).
+const USUAL_WAIT = 'Usually takes 20 to 30 seconds'
 
 type Status = 'waiting' | 'active' | 'done'
 
@@ -29,10 +33,7 @@ function statusOf(stage: Stage, events: StageEvent[], index: number): Status {
 function Marker({ status }: { status: Status }) {
   if (status === 'done') {
     return (
-      <span
-        aria-hidden="true"
-        className="flex size-5 items-center justify-center rounded-full border border-success-border bg-success-soft text-xs text-success-fg"
-      >
+      <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center text-xs text-success-fg">
         ✓
       </span>
     )
@@ -41,42 +42,72 @@ function Marker({ status }: { status: Status }) {
     return (
       <span
         aria-hidden="true"
-        className="size-5 rounded-full border-2 border-accent border-t-transparent motion-safe:animate-spin"
+        className="size-4 shrink-0 rounded-full border-2 border-accent border-t-transparent motion-safe:animate-spin"
       />
     )
   }
-  return <span aria-hidden="true" className="size-5 rounded-full border-2 border-border" />
+  return <span aria-hidden="true" className="size-4 shrink-0 rounded-full border-2 border-border" />
 }
 
-/** Live steps of a streamed search, in a recruiter's words. */
+function useSecondsSinceMount() {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    const started = Date.now()
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return seconds
+}
+
+/** Live steps of a streamed search, in a recruiter's words. The quick steps sit on one line; the
+ * step under way is the big thing, with a real count once the AI is judging people. */
 export function SearchProgress({ stages, label = 'Search progress' }: { stages: StageEvent[]; label?: string }) {
+  const seconds = useSecondsSinceMount()
   const statuses = STAGES.map((stage, index) => statusOf(stage, stages, index))
   const current = STAGES.find((_, index) => statuses[index] === 'active')
+  const latest = current ? [...stages].reverse().find((event) => event.stage === current) : undefined
+  const count = latest?.state === 'progress' && latest.completed != null && latest.total ? latest : undefined
+  // What the finished steps found, in their own words ("Looking first in Delhi", "Found 100 profiles").
+  const findings = STAGES.flatMap((stage) => {
+    const done = [...stages].reverse().find((event) => event.stage === stage && event.state === 'done')
+    return done?.detail ? [done.detail] : []
+  })
 
   return (
-    <div className="rounded-md border border-border bg-surface-muted px-4 py-4">
+    <div className="grid gap-4 rounded-md border border-border bg-surface-muted px-4 py-4">
       <p role="status" aria-live="polite" className="sr-only">
         {current ? `${LABELS[current]} in progress` : 'Preparing results'}
       </p>
-      <ol aria-label={label} className="grid gap-3 sm:grid-cols-5 sm:gap-4">
+      <ol aria-label={label} className="flex flex-wrap gap-x-5 gap-y-2">
         {STAGES.map((stage, index) => {
           const status = statuses[index] ?? 'waiting'
-          const done = [...stages].reverse().find((event) => event.stage === stage && event.state === 'done')
-          const started = stages.find((event) => event.stage === stage && event.state === 'started')
           return (
-            <li key={stage} className="flex items-start gap-3 sm:flex-col sm:gap-2" data-status={status}>
+            <li key={stage} className="flex items-center gap-2" data-status={status}>
               <Marker status={status} />
-              <div className="grid min-w-0 gap-0.5">
-                <span className={`text-sm font-medium ${status === 'waiting' ? 'text-fg-muted' : 'text-fg'}`}>
-                  {LABELS[stage]}
-                  <span className="sr-only">: {status === 'done' ? 'done' : status === 'active' ? 'in progress' : 'waiting'}</span>
-                </span>
-                <span className="text-xs text-fg-muted">{done?.detail ?? started?.detail ?? WAITING[stage]}</span>
-              </div>
+              <span className={`text-sm ${status === 'waiting' ? 'text-fg-muted' : 'text-fg'} ${status === 'active' ? 'font-medium' : ''}`}>
+                {LABELS[stage]}
+                <span className="sr-only">: {status === 'done' ? 'done' : status === 'active' ? 'in progress' : 'waiting'}</span>
+              </span>
             </li>
           )
         })}
       </ol>
+
+      {current && (
+        <div className="grid gap-2">
+          <p className="text-lg font-semibold text-fg">{count?.detail ?? LABELS[current]}</p>
+          {count ? (
+            <Meter percent={((count.completed ?? 0) / (count.total ?? 1)) * 100} tone="ok" label="Profiles judged" />
+          ) : (
+            <p className="text-sm text-fg-muted">{latest?.detail ?? WAITING[current]}</p>
+          )}
+        </div>
+      )}
+
+      {findings.length > 0 && <p className="text-sm text-fg-muted">{findings.join(' · ')}</p>}
+      <p className="num text-xs text-fg-muted">
+        {USUAL_WAIT} · {seconds} s so far
+      </p>
     </div>
   )
 }
