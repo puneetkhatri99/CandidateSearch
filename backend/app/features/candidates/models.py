@@ -55,8 +55,8 @@ class Candidate(TimestampedModel):
     source: Mapped[str] = mapped_column(String(30), server_default=text("'manual'"))
     source_ref: Mapped[str | None] = mapped_column(String(200))
     search_document: Mapped[str] = mapped_column(Text)
-    # Full-text index of the profile plus city (search_document leaves location out), maintained
-    # by Postgres; deferred so no load reads it.
+    # Full-text index of the profile plus city, maintained by Postgres; deferred so no load
+    # reads it.
     search_tsv: Mapped[str] = mapped_column(
         TSVECTOR,
         Computed(SEARCH_TSV_EXPRESSION, persisted=True),

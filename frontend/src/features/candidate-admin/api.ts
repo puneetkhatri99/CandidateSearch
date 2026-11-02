@@ -12,7 +12,7 @@ import {
 
 const BASE = '/api/v1/admin/candidates'
 export const PAGE_SIZE = 25
-export const SEARCH_RESULT_LIMIT = 20
+export const SEARCH_RESULT_LIMIT = 25
 
 function filterParams(filters: SearchFilters, limit: number) {
   const params = new URLSearchParams({ limit: String(limit) })
@@ -23,22 +23,24 @@ function filterParams(filters: SearchFilters, limit: number) {
   return params
 }
 
-type OnStage = (event: StageEvent) => void
+interface RunListeners {
+  onStage: (event: StageEvent) => void
+}
 
 /** Hybrid search, ranked by AI, then split by the hard filters; streams each step. */
-export function searchByMeaning(filters: SearchFilters, signal: AbortSignal, onStage: OnStage) {
+export function searchByMeaning(filters: SearchFilters, signal: AbortSignal, listeners: RunListeners) {
   const params = filterParams(filters, SEARCH_RESULT_LIMIT)
   return streamRequest<SemanticSearchResult, StageEvent>(`/api/v1/semantic-search/candidates/stream?${params}`, {
     signal,
-    onStage,
+    ...listeners,
   })
 }
 
 /** Candidates for a job, ranked by AI against it and split by its requirements; streams each step. */
-export function matchCandidatesToJob(jobId: string, signal: AbortSignal, onStage: OnStage) {
+export function matchCandidatesToJob(jobId: string, signal: AbortSignal, listeners: RunListeners) {
   return streamRequest<SemanticSearchResult, StageEvent>(
     `/api/v1/semantic-search/jobs/${encodeURIComponent(jobId)}/candidates/stream`,
-    { signal, onStage },
+    { signal, ...listeners },
   )
 }
 

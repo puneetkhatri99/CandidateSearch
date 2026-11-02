@@ -67,6 +67,7 @@ def create_app() -> FastAPI:
     api_v1.include_router(candidates.router)
     api_v1.include_router(candidates.admin_router)
     api_v1.include_router(semantic_search.router)
+    api_v1.include_router(health.admin_router)
     app.include_router(api_v1)
 
     return app

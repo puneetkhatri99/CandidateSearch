@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -8,7 +9,7 @@ from typing import Any
 import httpx2
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 
 from app.core.db import get_sessionmaker
 from app.core.embeddings import get_embedding_provider
@@ -21,11 +22,13 @@ from app.features.candidates import (
     create_candidate,
     full_text_candidate_ids,
     get_rankable_candidates,
+    rebuild_search_documents,
 )
 from app.features.candidates.models import Candidate
 from app.features.candidates.tests.factories import valid_candidate_payload
 from app.features.embeddings import CANDIDATES, JOBS, embed_stale
-from app.features.semantic_search import ranking, service
+from app.features.embeddings.repository import nearest_neighbours
+from app.features.semantic_search import ranking, service, understanding
 from app.features.semantic_search.schemas import HardFilters
 from app.shared.validation import split_tags
 from tests.integration.conftest import FETCH_HEADERS, create_job
@@ -53,13 +56,20 @@ def _judge_everyone_the_same(profile: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class ChatMock:
-    """Answers /v1/chat/completions like the ranking model would, from `judge`."""
+    """Answers /v1/chat/completions like the models would: rankings from `judge`, and the facts
+    of a search from `facts`. `payloads` and `statuses` are about the ranking calls only."""
 
     judge: Judge = _judge_everyone_the_same
     payloads: list[dict[str, Any]] = field(default_factory=list)
     statuses: list[int] = field(default_factory=list)
     # Set to answer with a refusal instead of judgements (still billed by OpenAI).
     refusal: str | None = None
+    facts: dict[str, Any] = field(
+        default_factory=lambda: {"city": None, "country_code": None, "min_years": None}
+    )
+    understanding_payloads: list[dict[str, Any]] = field(default_factory=list)
+    understanding_statuses: list[int] = field(default_factory=list)
+    understanding_delay_seconds: float = 0.0
 
     @staticmethod
     def profiles(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -69,16 +79,24 @@ class ChatMock:
 
     async def handler(self, request: httpx2.Request) -> httpx2.Response:
         payload = json.loads(request.content)
-        self.payloads.append(payload)
-        if self.statuses:
+        ranking_call = "Candidates:\n" in payload["messages"][1]["content"]
+        (self.payloads if ranking_call else self.understanding_payloads).append(payload)
+        statuses = self.statuses if ranking_call else self.understanding_statuses
+        if statuses:
             body = {"error": {"message": "mocked failure", "type": "mock_error", "code": None}}
-            return httpx2.Response(self.statuses.pop(0), json=body)
-        judgements = [self.judge(p) for p in self.profiles(payload)]
-        answer = {
-            "search_names_place": any(j["location"] != "not_required" for j in judgements),
-            "search_states_pay": any(j["salary"] != "not_required" for j in judgements),
-            "judgements": judgements,
-        }
+            return httpx2.Response(statuses.pop(0), json=body)
+        answer: dict[str, Any]
+        if ranking_call:
+            judgements = [self.judge(p) for p in self.profiles(payload)]
+            answer = {
+                "search_names_place": any(j["location"] != "not_required" for j in judgements),
+                "search_states_pay": any(j["salary"] != "not_required" for j in judgements),
+                "judgements": judgements,
+            }
+        else:
+            await asyncio.sleep(self.understanding_delay_seconds)
+            answer = self.facts
+        refusal = self.refusal if ranking_call else None
         return httpx2.Response(
             200,
             json={
@@ -92,8 +110,8 @@ class ChatMock:
                         "finish_reason": "stop",
                         "message": {
                             "role": "assistant",
-                            "content": None if self.refusal else json.dumps(answer),
-                            "refusal": self.refusal,
+                            "content": None if refusal else json.dumps(answer),
+                            "refusal": refusal,
                         },
                     }
                 ],
@@ -105,8 +123,10 @@ class ChatMock:
 @pytest.fixture(autouse=True)
 def empty_cache() -> Iterator[None]:
     ranking.clear_ranking_cache()
+    understanding.clear_understanding_cache()
     yield
     ranking.clear_ranking_cache()
+    understanding.clear_understanding_cache()
 
 
 @pytest.fixture(autouse=True)
@@ -184,7 +204,7 @@ async def test_the_llm_judgements_decide_the_order(
     assert (body["ranked_by"], body["ranking_model"], body["prompt_version"]) == (
         "ai",
         "gpt-5.4-mini",
-        "rank_v3",
+        "rank_v4",
     )
     first = body["items"][0]
     assert first["candidate"]["id"] == str(ids[2])
@@ -246,12 +266,106 @@ async def test_ranking_is_metered_with_output_tokens_and_audited(
     assert audit.details == {
         "mode": "semantic",
         "filters": ["q"],
-        "limit": 20,
+        "limit": 25,
+        "understood": [],
+        "understanding_prompt_version": "understand_v1",
         "result_count": 2,
         "filtered_out_count": 0,
         "ranked_by": "ai",
     }
     assert "payments" not in json.dumps(audit.details)
+
+
+async def test_the_ai_judges_the_whole_shortlist_but_only_the_top_25_are_returned(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    ids = await _seed_embedded(30)
+
+    def judge(profile: dict[str, Any]) -> dict[str, Any]:
+        number = int(profile["profile"].split("Specialist number ")[1].split(".")[0].split()[0])
+        return {**_judge_everyone_the_same(profile), "skills_score": 90 if number < 25 else 10}
+
+    chat_mock.judge = judge
+
+    body = (await admin_client.get(URL, params={"q": QUERY})).json()
+
+    [payload] = chat_mock.payloads
+    assert len(ChatMock.profiles(payload)) == 30
+    # Set by what the AI judged, not by the order the search fetched them in.
+    assert {m["candidate"]["id"] for m in body["items"]} == {str(cid) for cid in ids[:25]}
+
+
+async def test_a_place_in_the_search_text_brings_in_people_from_outside_the_shortlist(
+    admin_client: AsyncClient, chat_mock: ChatMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(service, "POOL_SIZE", 20)  # so 25 profiles overflow it
+    ids = await _seed_embedded(25)
+    unfiltered = (await admin_client.get(URL, params={"q": QUERY})).json()
+    shown = {m["candidate"]["id"] for m in unfiltered["items"]}
+    hidden = next(cid for cid in ids if str(cid) not in shown)
+    async with get_sessionmaker()() as session, session.begin():
+        await session.execute(update(Candidate).values(city="Chennai"))
+        (await session.get_one(Candidate, hidden)).city = "New Delhi"
+    understanding.clear_understanding_cache()
+    chat_mock.facts = {"city": "delhi", "country_code": None, "min_years": None}
+
+    body = (await admin_client.get(URL, params={"q": QUERY})).json()
+
+    # Fetched first, and nobody else is removed: the text isn't a filter.
+    assert ChatMock.profiles(chat_mock.payloads[-1])[0]["city"] == "New Delhi"
+    assert str(hidden) in {m["candidate"]["id"] for m in body["items"]}
+    assert len(body["items"]) == 20
+    assert body["filtered_out"] == []
+    assert all(m["failed_filters"] == [] for m in body["items"])
+    audit = (await _search_audits())[-1]
+    assert audit.details["understood"] == ["city"]
+    assert "delhi" not in json.dumps(audit.details).lower()
+
+
+async def test_a_filter_the_recruiter_set_wins_over_the_search_text(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    ids = await _seed_embedded(3)
+    async with get_sessionmaker()() as session, session.begin():
+        await session.execute(update(Candidate).values(city="Chennai"))
+        (await session.get_one(Candidate, ids[0])).city = "Delhi"
+    chat_mock.facts = {"city": "delhi", "country_code": None, "min_years": None}
+
+    body = (await admin_client.get(URL, params={"q": QUERY, "city": "chennai"})).json()
+
+    assert {m["candidate"]["id"] for m in body["items"]} == {str(ids[1]), str(ids[2])}
+    assert [m["failed_filters"] for m in body["filtered_out"]] == [["city"]]
+    assert [p["city"] for p in ChatMock.profiles(chat_mock.payloads[0])][:2] == ["Chennai"] * 2
+
+
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [("provider", "failed"), ("timeout", "failed"), ("invalid", "succeeded")],
+)
+async def test_a_search_still_works_when_its_text_cannot_be_understood(
+    admin_client: AsyncClient,
+    chat_mock: ChatMock,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    status: str,
+) -> None:
+    await _seed_embedded(2)
+    if failure == "provider":
+        chat_mock.understanding_statuses.append(500)
+    elif failure == "timeout":
+        monkeypatch.setattr(understanding, "TIMEOUT_SECONDS", 0.01)
+        chat_mock.understanding_delay_seconds = 1.0
+    else:
+        chat_mock.facts = {"city": "delhi", "country_code": "NOT-A-COUNTRY", "min_years": 999}
+
+    response = await admin_client.get(URL, params={"q": QUERY})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["ranked_by"], len(body["items"])) == ("ai", 2)
+    assert [e.status for e in await _events("search_understand")] == [status]
+    [audit] = await _search_audits()
+    assert audit.details["understood"] == []
 
 
 async def test_hard_filters_split_the_ranked_list_and_keep_its_order(
@@ -292,9 +406,10 @@ async def test_hard_filters_split_the_ranked_list_and_keep_its_order(
     }
 
 
-async def test_a_filter_finds_a_perfect_match_outside_the_unfiltered_top_20(
-    admin_client: AsyncClient,
+async def test_a_filter_finds_a_perfect_match_outside_the_unfiltered_shortlist(
+    admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(service, "POOL_SIZE", 20)  # so 25 profiles overflow it
     ids = await _seed_embedded(25)
     unfiltered = (await admin_client.get(URL, params={"q": QUERY})).json()
     shown = {m["candidate"]["id"] for m in unfiltered["items"]}
@@ -340,6 +455,7 @@ async def test_a_repeated_search_reuses_the_ranking(
     assert first.status_code == second.status_code == 200
     assert first.json()["items"] == second.json()["items"]
     assert len(chat_mock.payloads) == 1
+    assert len(chat_mock.understanding_payloads) == 1
 
 
 async def test_an_edited_profile_is_ranked_again(
@@ -364,7 +480,8 @@ async def test_when_the_llm_fails_results_keep_the_search_order(
         fits.city = "Ghaziabad"
     chat_mock.statuses.append(500)
 
-    response = await admin_client.get(URL, params={"q": "fastapi developer in ghaziabad"})
+    # Only the city is a keyword, so only that profile is in both halves of the fetch.
+    response = await admin_client.get(URL, params={"q": "ghaziabad"})
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -421,7 +538,9 @@ async def test_a_spent_budget_after_the_embedding_still_returns_results(
     assert response.status_code == 200, response.text
     assert response.json()["ranked_by"] == "search"
     assert chat_mock.payloads == []
+    assert chat_mock.understanding_payloads == []
     assert [e.status for e in await _events("search_query")] == ["succeeded"]
+    assert [e.status for e in await _events("search_understand")] == ["blocked"]
     assert [e.status for e in await _events("search_rank")] == ["blocked"]
 
 
@@ -503,7 +622,7 @@ async def test_recruiters_can_search_and_anonymous_users_cannot(
         {"q": "a"},
         {"q": "x" * 501},
         {"q": QUERY, "limit": 0},
-        {"q": QUERY, "limit": 21},
+        {"q": QUERY, "limit": 26},
         {},
         {"q": QUERY, "min_years": -1},
         {"q": QUERY, "country": "ZZ"},
@@ -632,13 +751,28 @@ async def test_a_streamed_search_reports_each_stage_then_the_result(
     ]
     details = {d["stage"]: d["detail"] for n, d in events if n == "stage" and d["state"] == "done"}
     assert details["retrieval"] == "Found 2 profiles, 2 meeting every filter"
-    assert details["ranking"] == "Ranked by gpt-5.4-mini"
+    assert details["ranking"] == "Every profile judged"
     assert all(d["elapsed_ms"] >= 0 for n, d in events if n == "stage" and d["state"] == "done")
     name, result = events[-1]
     assert name == "result"
     assert len(result["items"]) == 2
     # The query text is never echoed in the progress.
-    assert "payments" not in response.text.split("event: result")[0]
+    assert "payments" not in json.dumps([d for n, d in events if n == "stage"])
+
+
+async def test_a_streamed_search_sends_profiles_only_in_the_final_result(
+    admin_client: AsyncClient,
+) -> None:
+    await _seed_embedded(2)
+
+    response = await admin_client.get(f"{URL}/stream", params={"q": QUERY, "city": "Nowhere"})
+
+    events = _sse(response.text)
+    assert {name for name, _ in events[:-1]} == {"stage"}
+    assert "Semantic Person" not in json.dumps([data for _, data in events[:-1]])
+    name, result = events[-1]
+    assert name == "result"
+    assert all(m["fit"] is not None for m in result["filtered_out"])
 
 
 async def test_a_streamed_job_match_reports_errors_in_the_stream(
@@ -665,13 +799,57 @@ async def test_a_streamed_job_match_says_it_reused_the_saved_embedding(
     [embedding_done] = [
         d for n, d in events if n == "stage" and d["stage"] == "embedding" and d["state"] == "done"
     ]
-    assert embedding_done["detail"] == "Used the job's saved embedding, no new AI call"
+    assert embedding_done["detail"] == "Job understood from its saved profile, no new AI call"
     assert events[-1][0] == "result"
 
 
 async def test_streams_need_a_signed_in_user(client: AsyncClient) -> None:
     response = await client.get(f"{URL}/stream", params={"q": QUERY}, headers=FETCH_HEADERS)
     assert response.status_code == 401
+
+
+async def test_the_shortlist_is_not_cut_at_the_old_size_of_20(
+    admin_client: AsyncClient, chat_mock: ChatMock
+) -> None:
+    await _seed_embedded(25)
+
+    body = (await admin_client.get(URL, params={"q": QUERY})).json()
+
+    assert len(ChatMock.profiles(chat_mock.payloads[0])) == 25
+    assert len(body["items"]) == 25
+
+
+async def test_a_large_nearest_search_widens_the_index_scan() -> None:
+    # The HNSW index returns at most ef_search rows (40 by default), whatever the LIMIT says.
+    async with get_sessionmaker()() as session, session.begin():
+        await nearest_neighbours(session, [0.0] * 1536, "text-embedding-3-small", 100)
+        assert await session.scalar(text("SHOW hnsw.ef_search")) == "100"
+
+
+async def test_rebuilding_documents_updates_old_ones_without_touching_the_profile() -> None:
+    [old_format, _] = await _seed_embedded(2, city="Noida", country_code="IN")
+    async with get_sessionmaker()() as session, session.begin():
+        row = await session.get_one(Candidate, old_format)
+        row.search_document = "Document in an old format."
+    async with get_sessionmaker()() as session:
+        await embed_stale(session, get_embedding_provider(), CANDIDATES)
+    async with get_sessionmaker()() as session, session.begin():
+        before = await session.get_one(Candidate, old_format)
+        version, updated_at = before.version, before.updated_at
+
+    async with get_sessionmaker()() as session:
+        assert await rebuild_search_documents(session) == 1
+    async with get_sessionmaker()() as session:
+        assert await rebuild_search_documents(session) == 0  # nothing left to do
+
+    async with get_sessionmaker()() as session, session.begin():
+        rebuilt = await session.get_one(Candidate, old_format)
+        assert "Location: Noida, India." in rebuilt.search_document
+        assert (rebuilt.version, rebuilt.updated_at) == (version, updated_at)
+    # Only the changed one is embedded again.
+    async with get_sessionmaker()() as session:
+        outcome = await embed_stale(session, get_embedding_provider(), CANDIDATES)
+    assert outcome.embedded == 1
 
 
 async def _all_audits() -> list[AuditEvent]:

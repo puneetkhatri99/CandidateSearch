@@ -8,19 +8,13 @@ reopening a job must not change the document, or it would trigger an embedding c
 from collections.abc import Sequence
 from decimal import Decimal
 
-import pycountry
-
 from app.features.jobs.schemas import JobFields
 from app.shared.redaction import redact_identifiers
+from app.shared.validation import country_name
 
 
 def _format_years(value: Decimal) -> str:
     return f"{value.normalize():f}"
-
-
-def _country_name(country_code: str) -> str:
-    country = pycountry.countries.get(alpha_2=country_code)
-    return country.name if country else country_code
 
 
 def build_job_search_document(job: JobFields, redact_names: Sequence[str]) -> str:
@@ -40,7 +34,7 @@ def build_job_search_document(job: JobFields, redact_names: Sequence[str]) -> st
 
     place = [clean(job.city)] if job.city else []
     if job.country_code:
-        place.append(_country_name(job.country_code))
+        place.append(country_name(job.country_code))
     if place := [part for part in place if part]:
         lines.append(f"Location: {', '.join(place)}.")
 

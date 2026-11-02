@@ -34,7 +34,7 @@ describe('RootLayout navigation', () => {
 
     await screen.findByRole('link', { name: 'Users' })
 
-    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Jobs', 'Add job', 'AI spending', 'Users'])
+    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Jobs', 'Add job', 'AI spending', 'Users', 'System'])
   })
 
   it('hides Users from recruiters', async () => {
@@ -42,7 +42,7 @@ describe('RootLayout navigation', () => {
 
     await screen.findByText('Staff Member')
 
-    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Jobs', 'Add job', 'AI spending'])
+    expect(labels()).toEqual(['Candidates', 'Add candidate', 'Jobs', 'Add job', 'AI spending', 'System'])
   })
 
   it('marks Add job active on /jobs/new and Jobs active on other job paths', async () => {

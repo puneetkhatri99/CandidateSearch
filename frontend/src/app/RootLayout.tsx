@@ -41,6 +41,7 @@ export function RootLayout() {
     { to: '/jobs/new', label: 'Add job', active: onCreateJob },
     { to: '/admin/ai-usage', label: 'AI spending', active: pathname.startsWith('/admin/ai-usage') },
     ...(user?.role === 'admin' ? [{ to: '/admin/users', label: 'Users', active: pathname.startsWith('/admin/users') }] : []),
+    { to: '/admin/system', label: 'System', active: pathname.startsWith('/admin/system') },
   ]
 
   return (

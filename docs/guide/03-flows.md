@@ -197,14 +197,16 @@ semantic_search/service.py  search_by_meaning
   │                            (the query goes to OpenAI; emails and phones must not)
   ├─ get_embedding_provider()  no API key → 503
   ├─ STAGE embedding:  _embed_query → metered_call(embed [q])          timeout (10 s) or error → 503, budget used up → 402
+  │                    understanding.understand_query(q)                   city, country, min years; any failure → None
   ├─ _find_rank_and_filter
   │    ├─ STAGE retrieval:
   │    │    hybrid_ids(within):
-  │    │       nearest  = embeddings.nearest_candidates_to_vector(vector, 20, within)   meaning
-  │    │       keywords = candidates.full_text_candidate_ids(q, 20, within)             exact words
-  │    │       fuse(nearest, keywords) → best 20                                        RRF merge
-  │    │    with filters:   best 20 among people who pass + best 10 of everyone else
-  │    │    without:        best 20 overall
+  │    │       nearest  = embeddings.nearest_candidates_to_vector(vector, 100, within)  meaning
+  │    │       keywords = candidates.full_text_candidate_ids(q, 100, within)            exact words
+  │    │       fuse(nearest, keywords) → best 100                                       RRF merge
+  │    │    with filters:   best 100 among people who pass + best 10 of everyone else
+  │    │    without:        best 100 overall
+  │    │    facts read from q: people who also fit them go first in the 100
   │    │    pool = candidates.get_rankable_candidates(ids)
   │    ├─ STAGE augmentation:  ranking.build_prompt(q, pool)      anonymised JSON, no names
   │    ├─ STAGE ranking:       _rank_with_llm
@@ -221,7 +223,7 @@ semantic_search/service.py  search_by_meaning
 ### Why fetch two lists (meaning + keywords)?
 
 - Vectors find "the right kind of person" (a "backend engineer" query finds Django developers), but they are weak on exact facts like a city name or "5 years".
-- Full-text search catches exact words. Its index (`search_tsv`) also includes the **city**, which the redacted search document leaves out.
+- Full-text search catches exact words, including the city and country, which the search document states in its `Location:` line.
 - Merging both (RRF) gives a better shortlist than either alone.
 
 ### How the LLM's answer becomes an order
@@ -233,9 +235,10 @@ For each candidate the LLM returns: `skills_score` (0-100), a `location` verdict
 The sort key, highest first:
 
 1. **skills met** (score ≥ 60 → 1 point) **+ location points** (1 met, 0.5 partial, 0 missed)
-2. skills score
+2. skills score, in bands 20 points wide (a few points' difference is noise)
 3. salary points (only when the search or job states pay)
-4. experience score
+4. experience score, in the same bands
+5. actual years of experience
 
 Code-level guards on the LLM's answers:
 
@@ -247,7 +250,13 @@ Code-level guards on the LLM's answers:
 
 ### Why filter after ranking?
 
-The recruiter asked to see strong candidates that a filter removed. So filters don't throw people away; they **split** the ranked list. But filtering only after a top-20 fetch could hide real matches, so when filters are set the fetch runs twice: once only among people who pass (`candidates.candidate_ids_passing` as a subquery), once among everyone. Up to 30 profiles go to the LLM in one call.
+The recruiter asked to see strong candidates that a filter removed. So filters don't throw people away; they **split** the ranked list. But filtering only after a fetch could hide real matches, so when filters are set the fetch runs twice: once only among people who pass (`candidates.candidate_ids_passing` as a subquery), once among everyone. Up to 110 profiles go to the LLM in one call; the page gets the best 25, plus up to 10 filtered out.
+
+### A place typed in the search text
+
+`understanding.understand_query` makes one small LLM call that reads the city, country and minimum years the text states. Skills are left out on purpose: vectors and full text handle them, and exact tags would lose people tagged differently.
+
+People who fit those facts take the first places in the shortlist, and everyone else fills the rest. The facts are **not filters**: they never add a "Fails filter" or remove anyone from the results, and a filter the recruiter set wins over them. If the call fails, the search runs without the facts. The answer is cached for 10 minutes, because a different answer on a repeat would change the shortlist and pay for a new ranking.
 
 ---
 
@@ -275,14 +284,14 @@ The button stays disabled until the job's embedding is ready. The job page polls
 
 ## 8. Streaming the steps to the browser (SSE)
 
-A search takes a few seconds. To show progress, the `/stream` endpoints answer `text/event-stream`:
+A search takes about 25 seconds, nearly all of it the AI ranking. To show progress, the `/stream` endpoints answer `text/event-stream`:
 
 ```
 event: stage
-data: {"stage":"embedding","state":"started","detail":"Turning your search into an embedding"}
+data: {"stage":"embedding","state":"started","detail":"Working out what you're looking for"}
 
 event: stage
-data: {"stage":"embedding","state":"done","detail":"Search embedded","elapsed_ms":412}
+data: {"stage":"embedding","state":"done","detail":"Request understood","elapsed_ms":412}
 
 ... retrieval, augmentation, ranking, filtering ...
 
@@ -293,6 +302,7 @@ data: { ...the same JSON as the non-stream endpoint... }
 How it works:
 
 - The service functions take an optional `Progress` object (`semantic_search/progress.py`) and call `progress.start(...)` / `progress.done(...)`. Without a listener, those calls do nothing, which is why the plain JSON endpoints share the same code.
+- Stage events carry only counts. Profiles arrive only in the final `result`, so the page lists nobody until the AI has finished (user decision).
 - `streaming.stream_search` runs the search in its **own asyncio task with its own DB session**. Each stage event is put on an `asyncio.Queue`; the response reads from the queue and yields text.
 - Errors after the response has started can't change the HTTP status (already sent), so they are sent as an `event: error` with `status`, `code` and `message`. Validation and auth errors happen before streaming starts and still come back as normal JSON errors.
 - If the browser disconnects, the task is **not** cancelled. Cancelling a paid call mid-flight would leave its cost unrecorded. `_running` keeps a reference so the task isn't garbage-collected.

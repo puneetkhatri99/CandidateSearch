@@ -33,7 +33,7 @@ src/
     jobs/               job list, create, detail, edit, close
     user-admin/         staff accounts (admins)
     ai-usage/           AI spend page
-    system-status/      the "API online" indicator
+    system-status/      the "API online" dot in the sidebar, and the System page (/admin/system)
   shared/
     api/client.ts       fetch wrapper
     api/stream.ts       SSE reader
@@ -103,7 +103,7 @@ Example: `features/candidate-admin/hooks.ts`.
 | `useCandidateSearch(filters)` | The browse list (no search text). `useInfiniteQuery` with cursor paging ("Load more"). |
 | `useMeaningSearch(filters)` | Search by meaning. Calls `searchByMeaning` (SSE) and collects the stage events in `stages` for the progress panel. `staleTime` 5 minutes and no refetch on focus, because each run is a paid AI call. |
 | `useJobMatches(jobId, jobContentKey, { enabled })` | Job matching. Runs only after the user clicks **Find candidates** (`enabled`). The key includes the job's matching fields, so editing those fields never reuses old results, and never starts a paid run by itself. |
-| `useStageLog()` | A tiny state holder: `begin()` clears the log and returns a function that appends one stage event. |
+| `useRunLog()` | A tiny state holder: `begin()` clears the stages and returns the stream callback that fills them. |
 | `useCandidate(id)` | One profile. |
 | `useCreateStaffCandidate`, `useUpdateCandidate`, `useDeleteCandidate` | Mutations. On success they update the cached detail and invalidate cached search lists. |
 
@@ -115,10 +115,21 @@ Query keys are built in one `keys` object per file. Job matches deliberately sit
 
 - **Empty search box** → browse list (`useCandidateSearch`), filtered in SQL, no AI.
 - **Text + Search button / Enter** → `useMeaningSearch`. Typing alone never sends anything (each search is paid and sends text to OpenAI). The search uses a snapshot of the filters (`submitted`) taken when Search is pressed; editing a filter afterwards shows "Press Search to apply the changed filters" and costs nothing until then.
-- While it runs, `SearchProgress` shows the five steps (embedding → retrieval → augmentation → ranking → filtering) with a status and time each.
-- `MatchResults` shows two tables: **perfect matches** (pass every filter) and **filtered out** (with "Fails filter: City", etc.). Each row shows the AI's criteria notes.
+- While it runs, `SearchProgress` shows the five steps in recruiter words ("Finding likely people", "Hiding personal details", ...) with a status each. Component labels are the wording; the API's stage names stay `embedding`, `retrieval`, and so on.
+- `MatchResults` shows two lists of `MatchCard`s: **perfect matches** (pass every filter) and **filtered out** (with "Fails filter: City", etc.). Each card leads with the verdict and the AI's reason for each criterion. Email, source and date added are on the profile and in the browse table, not on the cards.
+- The list appears only once the AI has finished, with at most 25 perfect matches and 10 filtered out. Until then only `SearchProgress` shows, and results from the previous search are hidden too.
 
 The job detail page uses the same pieces through `JobMatches`.
+
+## The System page
+
+`SystemPage` (sidebar link "System", for all staff) shows three blocks:
+
+- **Status:** API, database and pgvector, and when they were last checked. It comes from `useSystemStatus`, which polls the public `/ready` every 30 s. `fetchReadiness` keeps the 503 body, so the page can say which dependency is down.
+- **Search and embeddings:** how many candidates and jobs have up-to-date embeddings, and the AI budget.
+- **AI models:** the models and prompt versions in use.
+
+The last two come from `GET /api/v1/admin/system` through `useSystemDetails`, also every 30 s. If that call fails, an alert shows and the status block keeps working. The small "API online" dot stays in the sidebar on every page.
 
 ## Forms
 

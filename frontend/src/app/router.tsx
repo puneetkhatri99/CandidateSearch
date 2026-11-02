@@ -4,6 +4,7 @@ import { ChangePasswordPage, LoginPage, RequireAuth, RequireRole } from '@/featu
 import { CandidateCreatePage, CandidateDetailPage, CandidateSearchPage } from '@/features/candidate-admin'
 import { CandidateIntakePage, PrivacyNoticePage } from '@/features/candidate-intake'
 import { JobCreatePage, JobDetailPage, JobListPage } from '@/features/jobs'
+import { SystemPage } from '@/features/system-status'
 import { UserListPage } from '@/features/user-admin'
 import { HomePage, NotFoundPage } from './pages'
 import { PublicLayout, RootLayout } from './RootLayout'
@@ -35,6 +36,7 @@ const routes = [
           { path: '/jobs', element: <JobListPage /> },
           { path: '/jobs/new', element: <JobCreatePage /> },
           { path: '/jobs/:id', element: <JobDetailPage /> },
+          { path: '/admin/system', element: <SystemPage /> },
           {
             element: <RequireRole role="admin" />,
             children: [{ path: '/admin/users', element: <UserListPage /> }],

@@ -33,10 +33,13 @@ export function CandidateSearchPage() {
   const browse = useCandidateSearch(requested, { enabled: !searching })
   const search = useMeaningSearch(searched, { enabled: searching })
   const active = searching ? search : browse
+  // The list appears only once the AI has finished; until then the progress panel shows.
+  const results = search.isFetching ? undefined : search.data
 
-  const perfectCount = search.data?.items.length ?? 0
+  const perfectCount = results?.items.length ?? 0
+  const filteredOutCount = results?.filtered_out.length ?? 0
   const browsed = browse.data?.pages.flatMap((page) => page.items) ?? []
-  const total = searching ? perfectCount + (search.data?.filtered_out.length ?? 0) : browsed.length
+  const total = searching ? perfectCount + filteredOutCount : browsed.length
 
   const { data: user } = useCurrentUser()
   const deletion = useDeleteCandidate()
@@ -50,6 +53,14 @@ export function CandidateSearchPage() {
     setQuery('')
     clearFilters()
   }
+  const noMatches = (
+    <div className="rounded-md bg-surface-muted px-6 py-12 text-center">
+      <p className="text-fg-muted">No candidates match your search.</p>
+      <Button variant="secondary" className="mt-4" onClick={clearAll}>
+        Clear search and filters
+      </Button>
+    </div>
+  )
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
@@ -61,7 +72,7 @@ export function CandidateSearchPage() {
               {!searching
                 ? `Showing ${plural(total, 'candidate')}${browse.hasNextPage ? ' (more available)' : ''}`
                 : filtersOn
-                  ? `${perfectCount} of the top ${plural(total, 'candidate')} match every filter`
+                  ? `${perfectCount} match every filter, ${filteredOutCount} filtered out`
                   : `Top ${plural(total, 'candidate')}, best match first`}
             </p>
           )
@@ -100,9 +111,9 @@ export function CandidateSearchPage() {
         </form>
         <CandidateFilters filters={filters} onChange={setFilter} onClear={clearAll} />
         {filtersPending && <p className="text-sm text-fg-muted">Press Search to apply the changed filters.</p>}
-        {searching && search.data && (
+        {searching && results && (
           <p className="text-sm text-fg-muted">
-            {search.data.ranked_by === 'search'
+            {results.ranked_by === 'search'
               ? 'AI ranking unavailable, so these are in search order. '
               : 'Ranked by AI: skills and location first, then experience. '}
             Filters are applied after ranking.
@@ -113,18 +124,17 @@ export function CandidateSearchPage() {
       {searching && search.isFetching && <SearchProgress stages={search.stages} />}
       {active.isError ? (
         <Alert>{active.error.message || 'Search failed. Please try again.'}</Alert>
-      ) : active.isPending ? (
+      ) : searching ? (
         // A search shows its live steps above instead of a skeleton.
-        !searching && <CandidateTableSkeleton />
+        results && (total === 0 ? (
+          noMatches
+        ) : (
+          <MatchResults result={results} filtered={filtersOn} onDelete={onDelete} />
+        ))
+      ) : browse.isPending ? (
+        <CandidateTableSkeleton />
       ) : total === 0 ? (
-        <div className="rounded-md bg-surface-muted px-6 py-12 text-center">
-          <p className="text-fg-muted">No candidates match your search.</p>
-          <Button variant="secondary" className="mt-4" onClick={clearAll}>
-            Clear search and filters
-          </Button>
-        </div>
-      ) : searching && search.data ? (
-        <MatchResults result={search.data} filtered={filtersOn} fetching={search.isFetching} onDelete={onDelete} />
+        noMatches
       ) : (
         <>
           <div className={browse.isFetching && !browse.isFetchingNextPage ? 'opacity-60 transition-opacity' : undefined}>

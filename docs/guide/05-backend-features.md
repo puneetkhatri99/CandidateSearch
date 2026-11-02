@@ -149,6 +149,7 @@ One section per feature in `backend/app/features/`. Inside each: endpoints, then
 | `RankableCandidate` | What the ranking may see: summary, the **redacted** profile text, city, country, years, skills, work modes, relocation, salary, `updated_at`. Never name or contact details. |
 | `get_rankable_candidates(session, ids)` | `{id: RankableCandidate}`; deleted ids are simply missing. |
 | `full_text_candidate_ids(session, query, count, within)` | Best keyword matches first. Used by hybrid search. |
+| `rebuild_search_documents(session)` | Rewrites every profile's stored document after its format changes, and returns how many changed. Leaves `version` and `updated_at` alone. The embedding scan then finds them stale. |
 | `candidate_ids_passing(min_years, skills, city, country, source)` | A **SQL subquery** (not a list) of ids that pass every hard filter. Other features pass it into their own queries as `WHERE id IN (subquery)`, so the filter rules stay inside this feature. |
 
 ### `candidates/repository.py`
@@ -324,22 +325,32 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 | `looks_personal(query)` | `True` for `@`, `://`, `www.`, or a phone number (`shared.redaction.contains_phone_number`: 10+ digits, the same rule redaction uses). Such queries are refused, because the query is sent to OpenAI. "10 years in 2024" and "budget 2500000 INR" are fine. |
 | `failed_filters(candidate, params)` | Which hard filters a candidate fails, in Python. **Same rules as `candidates.repository.hard_filter_clauses`.** |
 | `_active_filters(params)` | Names of filters that are set. |
+| `_with_understood(filters, understood)` | The recruiter's filters, plus the facts read from the search text where the recruiter set nothing. |
 | `_rank_with_llm(session, query, pool, required, progress)` | Builds the prompt, uses the 10-minute cache if possible, otherwise one metered `gpt-5.4-mini` call; returns ranked matches, or `None` if the AI is unavailable. Empty pool → no call. |
 | `_profiles(count)` | "1 profile" / "5 profiles" for progress messages. |
 | `_embed_query(session, provider, query)` | One metered embedding of the query with a 10 s timeout. Failure → 503. |
-| `search_by_meaning(session, params, actor, progress)` | The search entry point: refuse personal-looking queries, embed, `_find_rank_and_filter`, audit. |
+| `search_by_meaning(session, params, actor, progress)` | The search entry point: refuse personal-looking queries, embed, `understand_query`, `_find_rank_and_filter`, audit. |
 | `_JOB_WORK_MODES` | Maps job `onsite` to the ranking's `office`. |
 | `_pay_line(job)` | "Pay: 60000-90000 EUR per year." for the LLM brief. |
 | `job_filters(job)` | The job's own requirements as hard filters. City only binds hybrid/onsite jobs. |
 | `match_job(session, job_id, actor, progress)` | The job-matching entry point: uses the stored job vector (no embedding call), keywords from title + skills + city, the job's document + pay as the brief. 409 if the embedding isn't ready. |
 | `_counts(result)` | Counts for logs and audit. |
-| `_find_rank_and_filter(...)` | The shared pipeline: hybrid fetch (twice when filters are set), load rankable profiles, rank, split by filters. |
+| `_find_rank_and_filter(...)` | The shared pipeline: hybrid fetch (twice when filters are set, once more when facts were read from the text), load rankable profiles, rank, split by filters. |
+
+### `semantic_search/understanding.py`
+
+| Name | What it does |
+|---|---|
+| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/understand_v1.md`, loaded once. |
+| `QueryFacts` | The JSON the LLM must return: `city`, `country_code`, `min_years`, each null unless the text states it. |
+| `understand_query(session, query)` | One metered `gpt-5.4-mini` call with a 10 s timeout, about $0.0004. The answer is checked through `HardFilters`, then cached for 10 minutes. Any failure logs the class name and returns `None`, and the search carries on. |
+| `clear_understanding_cache()` | Empties the cache (tests). |
 
 ### `semantic_search/ranking.py`
 
 | Name | What it does |
 |---|---|
-| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v3.md`, loaded once. A prompt change gets a new file name. |
+| `PROMPT_VERSION`, `INSTRUCTIONS` | The prompt file `prompts/rank_v4.md`, loaded once. A prompt change gets a new file name. |
 | `RANK_MODEL` | `gpt-5.4-mini`. |
 | `required_work_mode(query)` | Finds "hybrid", "office/onsite/wfo" or "remote/wfh" in the search text. Hybrid wins if several appear. |
 | `fits_work_mode(candidate_modes, required)` | Office (2) ≥ hybrid (1) ≥ remote (0): a candidate fits if they accept at least as much office time as the role needs. |
@@ -348,7 +359,7 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 | `build_prompt(query, pool)` | "Search: ..." plus a numbered JSON list of anonymised profiles (redacted text, city, country, years, work modes, relocation, expected salary). Candidates are numbers, not ids or names. |
 | `judge_location(judgement, candidate, required, place_named)` | Location points and note, with code guards (work-mode rule, place named, relocation must be stated). |
 | `judge_salary(judgement, candidate, pay_named)` | Salary verdict and points, with guards (no stated salary → unknown). |
-| `to_match(...)` | One judgement → a sort key `(skills+location, skills score, salary points, experience score)` and the `SemanticMatch` with readable criteria. Fit: strong (2 points), partial (1), weak. |
+| `to_match(...)` | One judgement → a sort key `(skills+location, skills band, salary points, experience band, years)` and the `SemanticMatch` with readable criteria. Fit: strong (2 points), partial (1), weak. |
 | `rank_by_judgements(answer, pool, required)` | Sorts the pool by those keys; ties keep the hybrid order; unjudged candidates go last instead of disappearing. |
 | `cache_key`, `cached_answer`, `remember_answer`, `clear_ranking_cache` | An in-memory cache (128 entries, 10 minutes) keyed by model, prompt version, query, and each profile's id + `updated_at`. Repeating a search over unchanged profiles costs nothing. Editing a profile changes `updated_at`, so the cache misses. |
 
@@ -388,5 +399,11 @@ It has its own prefix because `/admin/candidates/semantic` would be captured by 
 | `GET /ready` | `readiness` → `service.check_readiness` | Checks the database (`SELECT 1`, `ping_database`) and that pgvector is installed (`pgvector_installed`). 503 if either fails. |
 
 They live at the root, not under `/api/v1`, so load balancers don't depend on API versions.
+
+| Endpoint | Function | What it does |
+|---|---|---|
+| `GET /api/v1/admin/system` | `system_details` → `service.get_system_details` | For the staff System page, any signed-in staff. Returns the embedding and ranking models and both prompt versions; for candidates and for jobs, how many exist, how many have a vector made from today's document, and how many have a failure recorded for it (`embeddings.get_embedding_counts`); and AI spend against the limit (`ai_usage.get_summary`). Counts, names and money only, never candidate data. |
+
+`health` is the one feature that reads three others (`embeddings`, `ai_usage`, `semantic_search`), always through their `__init__.py`. Nothing imports `health`, so this makes no cycle.
 
 Next: [06-frontend.md](06-frontend.md).

@@ -382,8 +382,8 @@ async def delete_candidate(
 
 @dataclass(frozen=True)
 class RankableCandidate:
-    """What a ranker may judge: the summary, plus the redacted profile and the facts the
-    embedded document leaves out (location, work modes). Never the name or contact details."""
+    """What a ranker may judge: the summary, plus the redacted profile and the structured facts
+    code rules need (location, work modes). Never the name or contact details."""
 
     summary: CandidateSummary
     profile_text: str
@@ -433,6 +433,24 @@ async def full_text_candidate_ids(
     """Best keyword matches first (profile text and city), optionally only among `within`."""
     async with session.begin():
         return await repository.full_text_candidate_ids(session, query, count, within)
+
+
+async def rebuild_search_documents(session: AsyncSession) -> int:
+    """Rewrite every profile's document after its format changes; returns how many changed.
+    Their hash then differs from the stored embedding's, so embedding picks them up as stale."""
+    async with session.begin():
+        changed = 0
+        for candidate in await repository.list_candidates_with_children(session):
+            # Already validated when saved; only the attributes the document reads are needed.
+            fields = (*_PROFILE_FIELDS, "experiences", "educations")
+            profile = CandidateProfile.model_construct(
+                **{field: getattr(candidate, field) for field in fields}
+            )
+            document = build_search_document(profile)
+            if document != candidate.search_document:
+                await repository.set_search_document(session, candidate.id, document)
+                changed += 1
+        return changed
 
 
 def candidate_ids_passing(

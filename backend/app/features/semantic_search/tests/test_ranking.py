@@ -15,6 +15,7 @@ def _candidate(
     work_modes: tuple[str, ...] = ("onsite",),
     relocate: bool | None = None,
     salary: int | None = None,
+    years: float = 6,
 ) -> RankableCandidate:
     payload = valid_candidate_payload()
     summary = CandidateSummary(
@@ -36,7 +37,7 @@ def _candidate(
         profile_text="Backend engineer. Skills: FastAPI.",
         city="Ghaziabad",
         country_code="IN",
-        years_experience=6,
+        years_experience=years,
         skills=("fastapi",),
         work_modes=work_modes,
         open_to_relocation=relocate,
@@ -119,8 +120,8 @@ def test_pay_comes_after_the_skills_score_and_before_experience() -> None:
     answer = _answer(
         pay=True,
         judgements=[
-            _judgement(1, 80, "same_city", 95, salary="above"),
-            _judgement(2, 80, "same_city", 60, salary="within"),
+            _judgement(1, 65, "same_city", 95, salary="above"),
+            _judgement(2, 65, "same_city", 60, salary="within"),
             _judgement(3, 95, "same_city", 40, salary="above"),
         ],
     )
@@ -130,6 +131,39 @@ def test_pay_comes_after_the_skills_score_and_before_experience() -> None:
     # Better skills win over budget; with equal skills, within budget beats more experience.
     assert [m.candidate.full_name for m in ranked] == ["Stronger", "Fits", "Pricey"]
     assert (ranked[2].criteria[3].name, ranked[2].criteria[3].status) == ("salary", "missed")
+
+
+def test_more_experienced_people_win_among_similar_skills() -> None:
+    # "devops tech lead in delhi": 5 years with a slightly higher score once beat 15 years.
+    junior = _candidate("Junior", years=5)
+    senior = _candidate("Senior", years=15)
+    answer = _answer(
+        judgements=[
+            _judgement(1, 92, "same_city", 85),
+            _judgement(2, 85, "same_city", 85),
+        ]
+    )
+
+    ranked = ranking.rank_by_judgements(answer, [junior, senior], None)
+
+    assert [m.candidate.full_name for m in ranked] == ["Senior", "Junior"]
+
+
+def test_a_real_gap_in_skills_or_experience_still_beats_years() -> None:
+    weaker_skills = _candidate("WeakerSkills", years=15)
+    misfit_experience = _candidate("Misfit", years=12)
+    best = _candidate("Best", years=6)
+    answer = _answer(
+        judgements=[
+            _judgement(1, 62, "same_city", 85),
+            _judgement(2, 85, "same_city", 30),
+            _judgement(3, 85, "same_city", 85),
+        ]
+    )
+
+    ranked = ranking.rank_by_judgements(answer, [weaker_skills, misfit_experience, best], None)
+
+    assert [m.candidate.full_name for m in ranked] == ["Best", "Misfit", "WeakerSkills"]
 
 
 def test_one_odd_verdict_does_not_decide_place_or_pay_for_everyone() -> None:

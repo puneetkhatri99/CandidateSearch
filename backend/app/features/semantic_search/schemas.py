@@ -7,7 +7,7 @@ from app.features.candidates import CandidateSummary
 from app.shared.validation import normalize_country
 
 MAX_QUERY_LENGTH = 500
-MAX_RESULTS = 20  # the service ranks only the 20 best hybrid-search hits
+MAX_RESULTS = 25  # the best of the larger shortlist the LLM ranks (service.POOL_SIZE)
 
 FilterName = Literal["min_years", "skill", "city", "country", "source"]
 
@@ -40,7 +40,7 @@ class HardFilters(BaseModel):
 
 class SemanticSearchParams(HardFilters):
     q: str = Field(min_length=2, max_length=MAX_QUERY_LENGTH)
-    limit: int = Field(default=20, ge=1, le=MAX_RESULTS)
+    limit: int = Field(default=MAX_RESULTS, ge=1, le=MAX_RESULTS)
 
     @field_validator("q", mode="before")
     @classmethod

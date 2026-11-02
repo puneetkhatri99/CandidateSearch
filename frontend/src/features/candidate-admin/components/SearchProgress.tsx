@@ -1,19 +1,19 @@
 import { STAGES, type Stage, type StageEvent } from '../types'
 
 const LABELS: Record<Stage, string> = {
-  embedding: 'Embedding',
-  retrieval: 'Retrieval',
-  augmentation: 'Augmentation',
-  ranking: 'AI ranking',
-  filtering: 'Filtering',
+  embedding: 'Understanding the request',
+  retrieval: 'Finding likely people',
+  augmentation: 'Hiding personal details',
+  ranking: 'Judging each person',
+  filtering: 'Checking filters',
 }
 // Shown until the server reports the step, so the pipeline reads ahead of time.
 const WAITING: Record<Stage, string> = {
-  embedding: 'Turn the request into a vector',
-  retrieval: 'Find the closest profiles by meaning and keywords',
-  augmentation: 'Prepare an anonymised brief',
-  ranking: 'Judge each candidate',
-  filtering: 'Split by the hard filters',
+  embedding: 'Works out what you need',
+  retrieval: 'Looks by meaning and by keywords',
+  augmentation: 'The AI never sees names or contact details',
+  ranking: 'Weighs skills, location, pay and experience',
+  filtering: 'Separates who meets every requirement',
 }
 
 type Status = 'waiting' | 'active' | 'done'
@@ -48,7 +48,7 @@ function Marker({ status }: { status: Status }) {
   return <span aria-hidden="true" className="size-5 rounded-full border-2 border-border" />
 }
 
-/** Live steps of a streamed search: embedding → retrieval → augmentation → ranking → filtering. */
+/** Live steps of a streamed search, in a recruiter's words. */
 export function SearchProgress({ stages, label = 'Search progress' }: { stages: StageEvent[]; label?: string }) {
   const statuses = STAGES.map((stage, index) => statusOf(stage, stages, index))
   const current = STAGES.find((_, index) => statuses[index] === 'active')
@@ -72,7 +72,6 @@ export function SearchProgress({ stages, label = 'Search progress' }: { stages: 
                   <span className="sr-only">: {status === 'done' ? 'done' : status === 'active' ? 'in progress' : 'waiting'}</span>
                 </span>
                 <span className="text-xs text-fg-muted">{done?.detail ?? started?.detail ?? WAITING[stage]}</span>
-                {done?.elapsed_ms != null && <span className="num text-xs text-fg-subtle">{done.elapsed_ms} ms</span>}
               </div>
             </li>
           )

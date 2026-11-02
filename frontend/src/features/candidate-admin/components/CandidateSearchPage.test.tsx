@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
@@ -163,11 +163,15 @@ describe('CandidateSearchPage', () => {
     )
     renderPage('/admin/candidates?q=payments+backend+engineer')
 
-    expect(await screen.findByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Match' })).toBeInTheDocument()
-    const cell = screen.getByRole('cell', { name: /^Partial/ })
-    expect(cell).toHaveTextContent('met: Skills: Python, FastAPI')
-    expect(cell).toHaveTextContent('not met: Location: Lives in Pune')
+    const name = await screen.findByRole('link', { name: 'Asha Verma' })
+    const card = name.closest('li')
+    expect(card).toHaveTextContent('Partial match')
+    expect(card).toHaveTextContent('met: Skills: Python, FastAPI')
+    expect(card).toHaveTextContent('not met: Location: Lives in Pune')
+    expect(card).toHaveTextContent('Senior Backend Engineer · Bengaluru, IN · 6.5 yrs')
+    expect(within(card as HTMLElement).getByRole('link', { name: 'Edit Asha Verma' })).toBeInTheDocument()
+    // The email stays on the profile; a result is about why the person fits.
+    expect(card).not.toHaveTextContent('asha@example.com')
     expect(screen.getByText(/Ranked by AI/)).toBeInTheDocument()
     expect(screen.getByText('Top 1 candidate, best match first')).toBeInTheDocument()
     // No filters, so no split into sections.
@@ -195,12 +199,12 @@ describe('CandidateSearchPage', () => {
     )
     renderPage('/admin/candidates?q=fastapi+developer&city=Pune&min_years=5')
 
-    const perfect = await screen.findByRole('table', { name: 'Candidates matching every filter' })
-    const removed = screen.getByRole('table', { name: 'Search matches removed by a filter' })
+    const perfect = await screen.findByRole('list', { name: 'Candidates matching every filter' })
+    const removed = screen.getByRole('list', { name: 'Search matches removed by a filter' })
     expect(within(perfect).getByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
     expect(within(removed).getByRole('link', { name: 'Ravi Kumar' })).toBeInTheDocument()
     expect(within(removed).getByText('Fails filter: City, Min years')).toBeInTheDocument()
-    expect(screen.getByText('1 of the top 2 candidates match every filter')).toBeInTheDocument()
+    expect(screen.getByText('1 match every filter, 1 filtered out')).toBeInTheDocument()
     const params = meaningCalls(fetchMock)[0]?.searchParams
     expect([params?.get('city'), params?.get('min_years')]).toEqual(['Pune', '5'])
   })
@@ -323,14 +327,73 @@ describe('CandidateSearchPage', () => {
 
     const steps = await screen.findByRole('list', { name: 'Search progress' })
     await waitFor(() => expect(within(steps).getByText('Search embedded')).toBeInTheDocument())
-    expect(within(steps).getByText('140 ms')).toBeInTheDocument()
-    expect(within(steps).getByText('Retrieval').closest('li')).toHaveAttribute('data-status', 'active')
-    expect(within(steps).getByText('AI ranking').closest('li')).toHaveAttribute('data-status', 'waiting')
+    expect(within(steps).getByText('Finding likely people').closest('li')).toHaveAttribute('data-status', 'active')
+    expect(within(steps).getByText('Judging each person').closest('li')).toHaveAttribute('data-status', 'waiting')
 
     finish()
 
     await waitFor(() => expect(screen.queryByRole('list', { name: 'Search progress' })).not.toBeInTheDocument())
     expect(screen.getByText('No candidates match your search.')).toBeInTheDocument()
+  })
+
+  it('lists nobody until the AI has finished, hiding the previous search too', async () => {
+    const finishes: ((value: void) => void)[] = []
+    const encoder = new TextEncoder()
+    const asha = candidateSummary()
+    const ravi = candidateSummary({ id: 'c-2', full_name: 'Ravi Kumar' })
+    const result = (items: unknown[]) =>
+      sseBody([
+        'result',
+        {
+          filtered_out: [],
+          embedding_model: 'text-embedding-3-small',
+          ranked_by: 'ai',
+          ranking_model: 'gpt-5.4-mini',
+          prompt_version: 'rank_v4',
+          items,
+        },
+      ])
+    const answers = [
+      result([{ candidate: asha, fit: 'weak', criteria: [], failed_filters: [] }]),
+      result([{ candidate: ravi, fit: 'strong', criteria: [], failed_filters: [] }]),
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (!url.includes('/semantic-search/')) return new Response('{}', { status: 200 })
+        const answer = answers.shift() ?? ''
+        const finished = new Promise<void>((resolve) => finishes.push(resolve))
+        const body = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            await finished
+            controller.enqueue(encoder.encode(answer))
+            controller.close()
+          },
+        })
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }),
+    )
+    renderPage('/admin/candidates?q=python')
+
+    await waitFor(() => expect(finishes).toHaveLength(1))
+    expect(screen.queryByRole('list', { name: 'Candidates matching your search' })).not.toBeInTheDocument()
+
+    finishes[0]?.()
+
+    await screen.findByRole('link', { name: 'Asha Verma' })
+    expect(screen.getByText('Top 1 candidate, best match first')).toBeInTheDocument()
+
+    const box = screen.getByRole('searchbox', { name: /search/i })
+    fireEvent.change(box, { target: { value: 'golang' } })
+    fireEvent.submit(box.closest('form') as HTMLFormElement)
+
+    await waitFor(() => expect(finishes).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Asha Verma' })).not.toBeInTheDocument())
+
+    finishes[1]?.()
+
+    await screen.findByText('Strong match')
+    expect(screen.getByRole('link', { name: 'Ravi Kumar' }).closest('li')).toHaveTextContent(/^1/)
   })
 
   it('shows an error when the search fails', async () => {

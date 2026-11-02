@@ -33,13 +33,13 @@ def _event(name: str, data: str) -> str:
 async def _events(search: Search) -> AsyncIterator[str]:
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    async def on_stage(event: StageEvent) -> None:
+    async def on_progress(event: StageEvent) -> None:
         await queue.put(_event("stage", event.model_dump_json()))
 
     async def run() -> None:
         try:
             async with get_sessionmaker()() as session:
-                result = await search(session, Progress(on_stage))
+                result = await search(session, Progress(on_progress))
             await queue.put(_event("result", result.model_dump_json()))
         except AppError as exc:
             error = {"status": exc.status_code, "code": exc.code, "message": exc.message}

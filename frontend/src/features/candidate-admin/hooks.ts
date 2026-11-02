@@ -61,22 +61,21 @@ export function useCandidateSearch(filters: SearchFilters, { enabled = true } = 
   })
 }
 
-/** The streamed steps of the run in progress; each new run starts an empty log. */
-function useStageLog() {
+/** The streamed steps of the run in progress; each new run starts empty. */
+function useRunLog() {
   const [stages, setStages] = useState<StageEvent[]>([])
   const begin = useCallback(() => {
     setStages([])
-    return (event: StageEvent) => setStages((seen) => [...seen, event])
+    return { onStage: (event: StageEvent) => setStages((seen) => [...seen, event]) }
   }, [])
   return { stages, begin }
 }
 
 export function useMeaningSearch(filters: SearchFilters, { enabled = true } = {}) {
-  const { stages, begin } = useStageLog()
+  const { stages, begin } = useRunLog()
   const query = useQuery({
     queryKey: keys.meaning(filters),
     queryFn: ({ signal }) => searchByMeaning(filters, signal, begin()),
-    placeholderData: keepPreviousData,
     retry: false,
     // Each new query is a paid OpenAI call; don't refetch on focus or remount.
     staleTime: 5 * 60_000,
@@ -87,7 +86,7 @@ export function useMeaningSearch(filters: SearchFilters, { enabled = true } = {}
 
 /** Runs only once `enabled` (the "Find candidates" button), since each run is a paid AI call. */
 export function useJobMatches(jobId: string, jobContentKey: string, { enabled = true } = {}) {
-  const { stages, begin } = useStageLog()
+  const { stages, begin } = useRunLog()
   const query = useQuery({
     queryKey: keys.jobMatches(jobId, jobContentKey),
     queryFn: ({ signal }) => matchCandidatesToJob(jobId, signal, begin()),

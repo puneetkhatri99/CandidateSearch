@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import ColumnElement, Select, Text, cast, delete, func, select, tuple_
+from sqlalchemy import ColumnElement, Select, Text, cast, delete, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -101,6 +101,24 @@ async def get_candidates_by_ids(
     if not candidate_ids:
         return []
     return list(await session.scalars(select(Candidate).where(Candidate.id.in_(candidate_ids))))
+
+
+async def list_candidates_with_children(session: AsyncSession) -> list[Candidate]:
+    statement = select(Candidate).options(
+        selectinload(Candidate.experiences), selectinload(Candidate.educations)
+    )
+    return list(await session.scalars(statement))
+
+
+async def set_search_document(
+    session: AsyncSession, candidate_id: uuid.UUID, document: str
+) -> None:
+    """Not an edit of the profile, so `version` and `updated_at` stay as they are."""
+    await session.execute(
+        update(Candidate)
+        .where(Candidate.id == candidate_id)
+        .values(search_document=document, updated_at=Candidate.updated_at)
+    )
 
 
 async def full_text_candidate_ids(

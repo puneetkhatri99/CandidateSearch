@@ -13,7 +13,8 @@ from pydantic import BaseModel, ValidationError
 from app.core.config import OPENAI_BASE_URL, get_settings
 
 # Interactive calls: one attempt, so a slow answer fails fast and is still metered as failed.
-TIMEOUT_SECONDS = 20.0
+# A non-streamed answer sends nothing until it is complete, and ranking 100 profiles is slow.
+TIMEOUT_SECONDS = 180.0
 
 
 class LLMError(Exception):

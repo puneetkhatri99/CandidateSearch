@@ -603,3 +603,49 @@ A running log of things learned about this project: decisions, gotchas, provider
   - The list endpoint lost `q`, `work_mode`, `max_years` and `sort`, and `candidates.lookup_text` and its trigram index are dropped (migration `d2b7e4a1c9f6`, applied to the dev DB; its downgrade rebuilds the column). This settles the open question in "One search box": staff have no name or email lookup. The `pg_trgm` extension stays installed, now unused.
   - The list now uses the shared `decode_created_at_cursor` / `next_created_at_cursor`. Their 2000-3000 year check fixed the two strict xfails for extreme timestamps; the three name and experience cursor xfails went with those sorts. A cursor timestamp with a trailing NUL still gives 200, which is harmless (see "Phase 3 build gotchas").
 - **Impact / action:** A new paid GET route belongs on the `semantic_search` router, or needs the same dependency. `test_sql_and_python_filters_agree_on_spellings` guards the two filter implementations.
+
+### 2026-10-30: Search results show up before the AI ranks them (~~superseded~~ 2026-11-02: the list now appears only after the AI finishes; see "Top 25, and what fixed the Delhi search")
+- **Context:** Making search feel better: result cards, recruiter wording, and a visible ranking.
+- **Learning:**
+  - The stream now sends a `preview` event after retrieval, with the same shape as `result` (`ranked_by: "search"`, no verdicts). It reuses the same split, so filtered-out people are already separated.
+  - A preview contains names and emails, so it counts as personal data like the result. Stage events still carry only counts.
+  - The reorder is a hand-written FLIP (measure, then animate with `element.animate`), not the View Transitions API. View Transitions freeze the page in a snapshot during the move, which would block the filter inputs. WAAPI ignores the CSS reduced-motion rule, so `useGlide` checks `matchMedia` itself.
+  - Positions are measured in page coordinates, so the progress panel closing above the list is part of the same glide rather than a jump.
+- **Impact / action:** `preview` in the hooks is non-null only while the run is fetching, so a finished, cached or failed search never shows stale previews. A new stage's wording goes in `SearchProgress`.
+
+### 2026-10-30: One session lookup costs 6 database round trips
+- **Context:** Checking whether database-backed sessions get slow when Postgres is on another server.
+- **Learning:** One `get_live_session` call in its own `session.begin()`, with `pool_pre_ping=True`, makes 6 client-to-server sends, counted through a local TCP proxy on a warm connection. It takes about 1-2 ms on localhost, but the time grows with network delay: about 650 ms with about 100 ms added per trip. Each later `session.begin()` in a request probably pays a similar overhead, because the connection goes back to the pool in between (not measured).
+- **Impact / action:** Run the API and Postgres in the same region or data centre. If the overhead ever shows up in real timings, look at `pool_pre_ping` and per-request connection reuse first; moving to JWT would only remove the login check's share.
+
+### 2026-11-02: Top 25, and what fixed the Delhi search
+- **Context:** "devops tech lead in delhi" gave different results from adding "india" or the Delhi filter, and juniors ranked above seniors. The user asked for no hardcoded places, a shortlist of 100, regenerated embeddings, the top 25 shown, the list only after the AI finishes, and an LLM that reads facts from the search text.
+- **Learning:**
+  - Measured on the dev DB (1,001 candidates, one query, real OpenAI calls). Time is the whole search; cost is mostly the ranking. "Understanding" is the new query-reading call.
+
+    | Run | Delhi people in top 10 | Time | Cost |
+    |---|---|---|---|
+    | Shortlist 100, no understanding | 6 | 28 s | $0.053 |
+    | Shortlist 100, understanding | 6 | 24 s | $0.051 |
+    | Shortlist 100, understanding, "india" added | 5 | 25 s | $0.051 |
+    | Shortlist 100, Delhi filter | 10 | 23 s | $0.039 |
+    | Shortlist 50, no understanding | 6 | 16 s | $0.028 |
+    | Shortlist 50, understanding | 10 | 15 s | $0.026 |
+
+  - The same five Delhi DevOps people (15, 13, 10, 8 and 5 years) came first in every run. Understanding did not change that. The likely cause of the fix is location in the embedded text plus the wider shortlist, though no run isolated those two changes.
+  - Understanding costs about $0.0004 and 1 s. It matters when the city's people nearly fill the shortlist: at 50, all 25 results were in Delhi, like the filter, but DevOps leads elsewhere were crowded out.
+  - The AI's judgement still varies between runs. A 6-year Delhi DevOps engineer was "strong" in some runs and "partial" in others, and a 3-year QA engineer was "strong" once.
+  - Ranking time is almost all output generation (about 7,000 tokens for 100 profiles), so it scales with the shortlist.
+  - Regenerating embeddings needs only `rebuild-search-documents`: the API's background runner then re-embeds whatever is stale. 1,001 candidates finished within minutes of the API starting.
+  - `hnsw.ef_search` (default 40) caps rows returned whatever the `LIMIT`, so it is raised to match a wider shortlist.
+  - The unranked preview and card animation were removed at the user's request, so results now arrive only in the final `result` event.
+- **Impact / action:** `POOL_SIZE` stays 100 pending the user's decision; 50 halves cost and wait.
+
+### 2026-11-02: System page, and the taste-skill install
+- **Context:** The user wanted API status and other details in their own section, and asked for `npx skills add Leonxlnx/taste-skill` to review the UI.
+- **Learning:**
+  - `fetchReadiness` used to turn a 503 from `/ready` into `checks: {}`, because `apiRequest` throws on any non-2xx. It now reads the body itself, so the System page can say whether the database or pgvector is down.
+  - Git is now installed, so `npx skills add` works; the 2026-10-30 entry about it needing a zip download no longer applies. The skill landed in `.agents/skills/design-taste-frontend`, with a symlink at `.claude/skills/design-taste-frontend`. Both are untracked.
+  - Only one of the skill's scripts touches the network (`assets.mjs`, which downloads pictures); `lint.mjs` and `inspect.mjs` work locally. `inspect.mjs` opens its own browser with no way to sign in, so it can't reach staff pages. Staff screenshots need Playwright with the API stubbed.
+  - Most of `lint.mjs --app` doesn't apply here: test fixtures (`example.com`, `Acme`), the ✓/✗ glyphs (which have screen-reader words), and dialog shadows (allowed by the skill's own rules). The blue `#2563eb` is flagged as a framework colour, but it was the user's choice ("Plain light/dark design system").
+- **Impact / action:** The new `/api/v1/admin/system` route reads counts only. Never add candidate fields to it. One query on seeded data is not an evaluation: `backend/evals` still doesn't exist, so `rank_v4` and `understand_v1` have had no eval run (RULES §8).

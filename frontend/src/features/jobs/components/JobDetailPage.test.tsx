@@ -113,12 +113,11 @@ describe('JobDetailPage', () => {
 
     await user.click(find)
 
-    const perfect = await screen.findByRole('table', { name: 'Candidates matching every filter' })
+    const perfect = await screen.findByRole('list', { name: 'Candidates matching every filter' })
     expect(within(perfect).getByRole('link', { name: 'Asha Verma' })).toBeInTheDocument()
-    expect(within(perfect).getByText(/Salary: Expects 18 LPA/)).toBeInTheDocument()
-    const removed = screen.getByRole('table', { name: 'Search matches removed by a filter' })
+    expect(perfect).toHaveTextContent('Salary: Expects 18 LPA')
+    const removed = screen.getByRole('list', { name: 'Search matches removed by a filter' })
     expect(within(removed).getByText('Fails filter: City')).toBeInTheDocument()
-    expect(within(perfect).getByRole('columnheader', { name: 'Expected pay' })).toBeInTheDocument()
     expect(within(perfect).getByText(/80,000/)).toBeInTheDocument()
     expect(matchCalls()).toHaveLength(1)
   })

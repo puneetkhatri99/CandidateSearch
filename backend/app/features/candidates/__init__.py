@@ -10,6 +10,7 @@ from app.features.candidates.service import (
     create_candidate,
     full_text_candidate_ids,
     get_rankable_candidates,
+    rebuild_search_documents,
 )
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "create_candidate",
     "full_text_candidate_ids",
     "get_rankable_candidates",
+    "rebuild_search_documents",
     "router",
 ]

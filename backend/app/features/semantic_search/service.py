@@ -24,7 +24,7 @@ from app.core.llm import LLMError, get_llm_client
 from app.features import ai_usage, candidates, embeddings, jobs
 from app.features.audit import record_event
 from app.features.auth import AuthContext
-from app.features.semantic_search import ranking
+from app.features.semantic_search import ranking, understanding
 from app.features.semantic_search.exceptions import (
     JobNotReadyForMatchingError,
     QueryLooksPersonalError,
@@ -51,7 +51,7 @@ RANK_OPERATION = "search_rank"
 EMBED_TIMEOUT_SECONDS = 10.0
 
 # Each half of the hybrid fetch, and the fused shortlist the LLM ranks (user's choice).
-POOL_SIZE = 20
+POOL_SIZE = 100
 # Best hybrid hits that fail a hard filter, ranked too and shown apart ("Filtered out").
 FILTERED_OUT_SIZE = 10
 
@@ -89,6 +89,17 @@ def _active_filters(params: HardFilters) -> list[str]:
     return [name for name in names if getattr(params, name) not in (None, "")]
 
 
+def _with_understood(filters: HardFilters, understood: HardFilters) -> HardFilters:
+    """The recruiter's filters, plus what the search text states where they set nothing."""
+    return HardFilters(
+        min_years=filters.min_years if filters.min_years is not None else understood.min_years,
+        skill=filters.skill,
+        city=filters.city or understood.city,
+        country=filters.country or understood.country,
+        source=filters.source,
+    )
+
+
 async def _rank_with_llm(
     session: AsyncSession,
     query: str,
@@ -98,7 +109,7 @@ async def _rank_with_llm(
 ) -> list[SemanticMatch] | None:
     """The pool ordered by the LLM's judgements, or None when the AI ranking is unavailable
     (no key, budget used up, provider error or timeout); the caller then falls back."""
-    await progress.start("augmentation", "Building an anonymised brief for the AI")
+    await progress.start("augmentation", "Removing names and contact details")
     content = ranking.build_prompt(query, pool)
     await progress.done("augmentation", f"{_profiles(len(pool))}, without names or contact details")
     await progress.start("ranking", "AI is judging each candidate")
@@ -134,7 +145,7 @@ async def _rank_with_llm(
             return None
         answer = result.parsed
         ranking.remember_answer(key, answer)
-        await progress.done("ranking", f"Ranked by {ranking.RANK_MODEL}")
+        await progress.done("ranking", "Every profile judged")
     return ranking.rank_by_judgements(answer, pool, required)
 
 
@@ -192,9 +203,10 @@ async def search_by_meaning(
         ) from exc
 
     progress = progress or Progress()
-    await progress.start("embedding", "Turning your search into an embedding")
+    await progress.start("embedding", "Working out what you're looking for")
     vector = await _embed_query(session, provider, params.q)
-    await progress.done("embedding", "Search embedded")
+    understood = await understanding.understand_query(session, params.q)
+    await progress.done("embedding", "Request understood")
     result = await _find_rank_and_filter(
         session,
         vector=vector,
@@ -203,6 +215,7 @@ async def search_by_meaning(
         brief=params.q,
         required=ranking.required_work_mode(params.q),
         filters=params,
+        understood=understood,
         limit=params.limit,
         progress=progress,
     )
@@ -219,6 +232,9 @@ async def search_by_meaning(
                 "mode": "semantic",
                 "filters": ["q", *_active_filters(params)],
                 "limit": params.limit,
+                # Which facts were read, never their values: they come from the query text.
+                "understood": _active_filters(understood) if understood else [],
+                "understanding_prompt_version": understanding.PROMPT_VERSION,
                 **_counts(result),
             },
         )
@@ -263,18 +279,18 @@ async def match_job(
     actor: AuthContext,
     progress: Progress | None = None,
 ) -> SemanticSearchResult:
-    """Candidates for a job: its stored embedding plus full text fetch 20, the LLM ranks them
+    """Candidates for a job: its stored embedding plus full text fetch them, the LLM ranks them
     against the job (pay included), then the job's requirements split the list."""
     progress = progress or Progress()
     job = await jobs.get_job_brief(session, job_id)
     model = get_settings().embedding_model
-    await progress.start("embedding", "Loading the job's embedding")
+    await progress.start("embedding", "Reading the job")
     vector = await embeddings.load_job_vector(session, job_id, model)
     if vector is None:
         raise JobNotReadyForMatchingError(
             "This job's AI embedding isn't ready yet. Try again in a few seconds."
         )
-    await progress.done("embedding", "Used the job's saved embedding, no new AI call")
+    await progress.done("embedding", "Job understood from its saved profile, no new AI call")
     keywords = " ".join([job.title, *job.must_have_skills, job.city or ""])
     result = await _find_rank_and_filter(
         session,
@@ -320,18 +336,28 @@ async def _find_rank_and_filter(
     filters: HardFilters,
     limit: int,
     progress: Progress,
+    understood: HardFilters | None = None,
 ) -> SemanticSearchResult:
     """Hybrid fetch, LLM ranking against `brief`, then the hard filters split the ranked list
     (so both parts keep the ranked order).
 
-    With filters, the best 20 are fetched among the candidates who pass them (so a perfect
+    With filters, the best POOL_SIZE are fetched among the candidates who pass them (so a perfect
     match is never crowded out of the shortlist), plus the best 10 of everyone else, so
-    strong candidates a filter removed are still shown.
+    strong candidates a filter removed are still shown. People who also fit what the search
+    text states (`understood`) take the first places in that shortlist.
     """
 
+    def passing_ids(applied: HardFilters) -> Select[uuid.UUID]:
+        return candidates.candidate_ids_passing(
+            min_years=applied.min_years,
+            skills=split_tags(applied.skill),
+            city=applied.city or None,
+            country=applied.country,
+            source=applied.source or None,
+        )
+
     async def hybrid_ids(within: Select[uuid.UUID] | None) -> list[uuid.UUID]:
-        # Vectors find the right kind of profile; full text catches exact skills and the city,
-        # which the embedded document leaves out.
+        # Vectors find the right kind of profile; full text catches exact skills and places.
         nearest = await embeddings.nearest_candidates_to_vector(
             session, vector, embedding_model, count=POOL_SIZE, within=within
         )
@@ -341,58 +367,58 @@ async def _find_rank_and_filter(
         return ranking.fuse([cid for cid, _ in nearest], keyword_ids, count=POOL_SIZE)
 
     await progress.start("retrieval", "Searching profiles by meaning and keywords")
+    filtered = bool(_active_filters(filters))
     passing: list[uuid.UUID] = []
-    if _active_filters(filters):
-        passing = await hybrid_ids(
-            candidates.candidate_ids_passing(
-                min_years=filters.min_years,
-                skills=split_tags(filters.skill),
-                city=filters.city or None,
-                country=filters.country,
-                source=filters.source or None,
-            )
-        )
+    preferred: list[uuid.UUID] = []
+    if understood is not None and _active_filters(understood):
+        preferred = await hybrid_ids(passing_ids(_with_understood(filters, understood)))
+    if filtered:
+        passing = await hybrid_ids(passing_ids(filters))
+        passing = list(dict.fromkeys(preferred + passing))[:POOL_SIZE]
         passing_set = set(passing)
         others = [cid for cid in await hybrid_ids(None) if cid not in passing_set]
         pool_ids = passing + others[:FILTERED_OUT_SIZE]
     else:
-        pool_ids = await hybrid_ids(None)
+        pool_ids = list(dict.fromkeys(preferred + await hybrid_ids(None)))[:POOL_SIZE]
     found = await candidates.get_rankable_candidates(session, pool_ids)
     pool = [found[cid] for cid in pool_ids if cid in found]  # deleted between the reads
     await progress.done(
         "retrieval",
         f"Found {_profiles(len(pool))}"
-        + (f", {len(passing)} meeting every filter" if _active_filters(filters) else ""),
+        + (f", {len(passing)} meeting every filter" if filtered else ""),
     )
 
-    ranked = await _rank_with_llm(session, brief, pool, required, progress)
-    ranked_by: Literal["ai", "search"] = "ai"
-    if ranked is None:
-        ranked_by = "search"
-        ranked = [SemanticMatch(candidate=c.summary, fit=None, criteria=[]) for c in pool]
-
-    await progress.start("filtering", "Checking the hard filters")
     by_id = {c.summary.id: c for c in pool}
-    items: list[SemanticMatch] = []
-    filtered_out: list[SemanticMatch] = []
-    for match in ranked:
-        failed = failed_filters(by_id[match.candidate.id], filters)
-        if failed:
-            filtered_out.append(match.model_copy(update={"failed_filters": failed}))
-        else:
-            items.append(match)
-    items, filtered_out = items[:limit], filtered_out[:FILTERED_OUT_SIZE]
+
+    def split(
+        ranked: list[SemanticMatch], ranked_by: Literal["ai", "search"]
+    ) -> SemanticSearchResult:
+        items: list[SemanticMatch] = []
+        filtered_out: list[SemanticMatch] = []
+        for match in ranked:
+            failed = failed_filters(by_id[match.candidate.id], filters)
+            if failed:
+                filtered_out.append(match.model_copy(update={"failed_filters": failed}))
+            else:
+                items.append(match)
+        ai = ranked_by == "ai"
+        return SemanticSearchResult(
+            items=items[:limit],
+            filtered_out=filtered_out[:FILTERED_OUT_SIZE],
+            ranked_by=ranked_by,
+            embedding_model=embedding_model,
+            ranking_model=ranking.RANK_MODEL if ai else None,
+            prompt_version=ranking.PROMPT_VERSION if ai else None,
+        )
+
+    search_order = [SemanticMatch(candidate=c.summary, fit=None, criteria=[]) for c in pool]
+    ranked = await _rank_with_llm(session, brief, pool, required, progress)
+    await progress.start("filtering", "Checking your filters")
+    result = split(search_order, "search") if ranked is None else split(ranked, "ai")
+    perfect = len(result.items)
     await progress.done(
         "filtering",
-        f"{len(items)} perfect match{'' if len(items) == 1 else 'es'}, "
-        f"{len(filtered_out)} filtered out",
+        f"{perfect} perfect match{'' if perfect == 1 else 'es'}, "
+        f"{len(result.filtered_out)} filtered out",
     )
-    ai = ranked_by == "ai"
-    return SemanticSearchResult(
-        items=items,
-        filtered_out=filtered_out,
-        ranked_by=ranked_by,
-        embedding_model=embedding_model,
-        ranking_model=ranking.RANK_MODEL if ai else None,
-        prompt_version=ranking.PROMPT_VERSION if ai else None,
-    )
+    return result

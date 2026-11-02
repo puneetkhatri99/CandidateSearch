@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from app.features.candidates.schemas import CandidateProfile, EducationIn, ExperienceIn
 from app.shared import redaction
+from app.shared.validation import country_name
 
 
 def redact_identifiers(text: str, full_name: str) -> str:
@@ -48,8 +49,13 @@ def _format_education(edu: EducationIn, full_name: str) -> str:
 
 def build_search_document(candidate: CandidateProfile) -> str:
     name = candidate.full_name
+    place = [redact_identifiers(candidate.city, name), country_name(candidate.country_code)]
+    location = f"Location: {', '.join(part for part in place if part)}."
+    if candidate.open_to_relocation:
+        location += " Open to relocation."
     lines = [
         f"{redact_identifiers(candidate.headline, name)}.",
+        location,
         f"{_format_years(candidate.years_experience)} years experience.",
     ]
     # Skills can all redact away when they collide with the name; skip the empty line then.

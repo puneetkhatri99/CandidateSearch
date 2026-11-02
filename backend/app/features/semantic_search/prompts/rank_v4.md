@@ -17,7 +17,7 @@ Then, in `judgements`, for each candidate return:
   - `willing_to_relocate`: the candidate lives elsewhere but `open_to_relocation` is true.
   - `elsewhere`: anything else.
 - `location_note`: at most 8 words, e.g. "Lives in Noida, commutable to Ghaziabad".
-- `experience_score` (0-100): how well the experience fits. When a number of years is stated, treat it as a minimum: below it scores under 40, and at or above it the most relevant experience scores highest (total years matter less than relevance). When no years are stated, judge relevance of the experience alone.
+- `experience_score` (0-100): how well the experience fits. When a number of years is stated, treat it as a minimum: below it scores under 40, and at or above it the most relevant experience scores highest (total years matter less than relevance). When the search names a seniority such as lead, senior, principal, head or manager, more relevant years and past leadership score higher, and someone with few years scores under 40. When it asks for junior or entry-level people, fewer years score higher. When neither years nor seniority are stated, judge relevance of the experience alone.
 - `experience_note`: at most 10 words, e.g. "6 years, 4 building FastAPI services".
 - `salary`, exactly one of:
   - `not_required`: the search states no pay or budget.

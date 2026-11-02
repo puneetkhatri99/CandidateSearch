@@ -1,6 +1,7 @@
 """Hybrid retrieval fusion, and ranking of the shortlist by an LLM with readable reasons.
 
-Order (user decision): skills and location first, then experience. The LLM only *judges*
+Order (user decision): skills and location first, then experience, with more years winning
+among otherwise similar people. The LLM only *judges*
 each criterion; this code decides the order, so the same answers always give the same order.
 """
 
@@ -18,17 +19,20 @@ from pydantic import BaseModel
 from app.features import candidates
 from app.features.semantic_search.schemas import Criterion, Fit, SemanticMatch
 
-PROMPT_VERSION = "rank_v3"
+PROMPT_VERSION = "rank_v4"
 INSTRUCTIONS = (Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md").read_text("utf-8")
 RANK_MODEL = "gpt-5.4-mini"
-# Room for up to 30 judgements (about 150 tokens each); caps a runaway answer at about $0.045
+# Room for up to 110 judgements (about 150 tokens each); caps a runaway answer at about $0.09
 # (gpt-5.4-mini output is $4.50 per million tokens).
-MAX_OUTPUT_TOKENS = 10_000
+MAX_OUTPUT_TOKENS = 20_000
 # Reciprocal rank fusion constant; 60 is the usual choice and keeps either list from dominating.
 RRF_K = 60
 SKILLS_MET_SCORE = 60
 EXPERIENCE_MET_SCORE = 60
 EXPERIENCE_PARTIAL_SCORE = 30
+# LLM scores wobble by a few points between runs, so only a gap of about this size counts.
+# Without bands, a 91 over an 88 decided the order and experience almost never got a say.
+SCORE_BAND = 20
 RANKING_CACHE_SIZE = 128
 RANKING_CACHE_SECONDS = 600.0
 
@@ -127,6 +131,13 @@ def _clamp(score: int) -> int:
     return max(0, min(100, score))
 
 
+def _band(score: int) -> int:
+    return min(score, 99) // SCORE_BAND
+
+
+type SortKey = tuple[float, int, float, int, float]
+
+
 def judge_location(
     judgement: CandidateJudgement,
     candidate: candidates.RankableCandidate,
@@ -182,9 +193,9 @@ def to_match(
     required: WorkMode | None,
     place_named: bool = False,
     pay_named: bool = False,
-) -> tuple[tuple[float, int, float, int], SemanticMatch]:
+) -> tuple[SortKey, SemanticMatch]:
     """The sort key (higher is better) and the match shown to the recruiter: skills and
-    location first, then the skills score, then pay, then experience."""
+    location first, then the skills band, pay, the experience band, and finally actual years."""
     skills = _clamp(judgement.skills_score)
     experience = _clamp(judgement.experience_score)
     skills_points = 1.0 if skills >= SKILLS_MET_SCORE else 0.0
@@ -208,7 +219,8 @@ def to_match(
         note = "No expected salary stated" if salary_verdict == "unknown" else judgement.salary_note
         criteria.append(Criterion(name="salary", status=_status(salary_points), note=note))
     match = SemanticMatch(candidate=candidate.summary, fit=fit, criteria=criteria)
-    return (total, skills, salary_points, experience), match
+    key = (total, _band(skills), salary_points, _band(experience), candidate.years_experience)
+    return key, match
 
 
 def rank_by_judgements(
@@ -216,11 +228,11 @@ def rank_by_judgements(
     pool: Sequence[candidates.RankableCandidate],
     required: WorkMode | None,
 ) -> list[SemanticMatch]:
-    """Skills + location first, then skills score, then pay, then experience. A candidate the
-    LLM left out (or numbered wrongly) is kept, last, rather than silently dropped."""
+    """Ordered by `to_match`'s key. A candidate the LLM left out (or numbered wrongly) is kept,
+    last, rather than silently dropped."""
     by_number = {j.candidate: j for j in answer.judgements}
     place_named, pay_named = answer.search_names_place, answer.search_states_pay
-    ranked: list[tuple[tuple[float, int, float, int], int, SemanticMatch]] = []
+    ranked: list[tuple[SortKey, int, SemanticMatch]] = []
     for number, candidate in enumerate(pool, start=1):
         judgement = by_number.get(number)
         if judgement is None:
@@ -229,7 +241,7 @@ def rank_by_judgements(
                 fit="weak",
                 criteria=[Criterion(name="skills", status="missed", note="Not assessed")],
             )
-            ranked.append(((-1.0, 0, 0.0, 0), number, unjudged))
+            ranked.append(((-1.0, 0, 0.0, 0, 0.0), number, unjudged))
             continue
         key, match = to_match(judgement, candidate, required, place_named, pay_named)
         ranked.append((key, number, match))
