@@ -774,3 +774,8 @@ A running log of things learned about this project: decisions, gotchas, provider
   - In Windows PowerShell 5.1, `2>&1` on a native command under `$ErrorActionPreference = 'Stop'` throws on the first stderr line (the Vercel CLI prints its banner there), so the script reads stdout only.
   - Not verified on Vercel itself (no deploy was made from this machine): that streamed search events arrive one by one rather than all at the end.
 - **Impact / action:** Run `scripts\deploy-vercel.ps1` from the repo root. Test a search and a resume upload right after the first deploy.
+
+### 2026-11-02: A Git deploy on Vercel had no frontend
+- **Context:** First deploy, made from GitHub in the Vercel dashboard rather than with `scripts/deploy-vercel.ps1`. `/health` and `/ready` answered 200, but `/` was FastAPI's 404.
+- **Learning:** `backend/frontend_dist` is gitignored, so only the script's upload contained it. `backend/vercel_build.py` now runs as Vercel's build command (`[tool.vercel.scripts] build`): it builds `../frontend` and copies `dist/` in, unless a copy is already there. That needs Vercel's "Include files outside the root directory in the Build Step" setting (on by default) and npm in the build image. Earlier, the app also refused to start until `RATE_LIMIT_KEY_SECRET` was 32+ characters in Vercel, as designed.
+- **Impact / action:** Both ways of deploying now ship the frontend. Changing environment variables in Vercel needs a redeploy.

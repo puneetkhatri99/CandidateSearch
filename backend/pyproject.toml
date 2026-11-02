@@ -48,6 +48,10 @@ packages = ["app"]
 # Vercel runs the FastAPI `app` from app/main.py (backend/ is the Vercel project root).
 entrypoint = "app.main:app"
 
+[tool.vercel.scripts]
+# A Git deploy has no built frontend (frontend_dist is gitignored): build it from ../frontend.
+build = "python vercel_build.py"
+
 [tool.vercel.fastapi.static]
 # The app has middleware, which would keep the frontend files in the function; they are public
 # build output with nothing to protect, so serve them from the CDN.
