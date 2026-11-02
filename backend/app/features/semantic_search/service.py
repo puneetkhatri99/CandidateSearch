@@ -306,29 +306,35 @@ async def _embed_query(
     return batch.vectors[0]
 
 
-async def search_by_meaning(
-    session: AsyncSession,
-    params: SemanticSearchParams,
-    actor: AuthContext,
-    progress: Progress | None = None,
-) -> SemanticSearchResult:
-    """Fetch the best hybrid matches (meaning + full text), then let the LLM rank them.
-
-    Raises BudgetExceededError (402) when the query can't even be embedded within the AI
-    spending limit; a ranking that can't run returns the hybrid-search order instead.
-    """
-    if looks_personal(params.q):
-        raise QueryLooksPersonalError(
-            "Emails, phone numbers and links can't be searched. "
-            "Describe the role or skills you need instead."
-        )
+def _provider() -> OpenAIEmbeddingProvider:
     try:
-        provider = get_embedding_provider()
+        return get_embedding_provider()
     except EmbeddingConfigurationError as exc:
         raise SemanticSearchUnavailableError(
             "Search needs an OpenAI API key. Clear the search to browse by filters."
         ) from exc
 
+
+def _refuse_personal(query: str) -> None:
+    if looks_personal(query):
+        raise QueryLooksPersonalError(
+            "Emails, phone numbers and links can't be searched. "
+            "Describe the role or skills you need instead."
+        )
+
+
+async def find_matches(
+    session: AsyncSession, params: SemanticSearchParams, progress: Progress | None = None
+) -> tuple[SemanticSearchResult, HardFilters | None]:
+    """Fetch the best hybrid matches (meaning + full text), then let the LLM rank them; also
+    returns the facts read from the query. Not audited or saved: search_by_meaning does that,
+    and the evaluation (evaluation.py) calls this directly.
+
+    Raises BudgetExceededError (402) when the query can't even be embedded within the AI
+    spending limit; a ranking that can't run returns the hybrid-search order instead.
+    """
+    _refuse_personal(params.q)
+    provider = _provider()
     progress = progress or Progress()
     await progress.start("embedding", "Working out what you're looking for")
     vector = await _embed_query(session, provider, params.q)
@@ -347,6 +353,17 @@ async def search_by_meaning(
         limit=params.limit,
         progress=progress,
     )
+    return result, understood
+
+
+async def search_by_meaning(
+    session: AsyncSession,
+    params: SemanticSearchParams,
+    actor: AuthContext,
+    progress: Progress | None = None,
+) -> SemanticSearchResult:
+    """find_matches, then the audit row and the searcher's saved copy."""
+    result, understood = await find_matches(session, params, progress)
     # Who searched and how many profiles they saw; never the query text or the ids.
     async with session.begin():
         record_event(
@@ -449,6 +466,39 @@ def _counts(result: SemanticSearchResult) -> dict[str, object]:
     }
 
 
+async def _hybrid_ids(
+    session: AsyncSession,
+    vector: list[float],
+    embedding_model: str,
+    keyword_text: str,
+    within: Select[uuid.UUID] | None,
+) -> list[uuid.UUID]:
+    # Vectors find the right kind of profile; full text catches exact skills and places.
+    nearest = await embeddings.nearest_candidates_to_vector(
+        session, vector, embedding_model, count=POOL_SIZE, within=within
+    )
+    keyword_ids = await candidates.full_text_candidate_ids(
+        session, keyword_text, count=POOL_SIZE, within=within
+    )
+    return ranking.fuse([cid for cid, _ in nearest], keyword_ids, count=POOL_SIZE)
+
+
+async def label_pool(
+    session: AsyncSession, query: str, count: int
+) -> list[candidates.RankableCandidate]:
+    """The `count` best hybrid matches, without the AI ranking, for a person to grade.
+
+    Costs one query embedding (about $0.000001). Kept independent of the ranking under test,
+    so the grades don't simply echo the AI's picks.
+    """
+    _refuse_personal(query)
+    provider = _provider()
+    vector = await _embed_query(session, provider, query)
+    ids = (await _hybrid_ids(session, vector, provider.model_name, query, None))[:count]
+    found = await candidates.get_rankable_candidates(session, ids)
+    return [found[cid] for cid in ids if cid in found]
+
+
 async def _find_rank_and_filter(
     session: AsyncSession,
     *,
@@ -484,14 +534,7 @@ async def _find_rank_and_filter(
         )
 
     async def hybrid_ids(within: Select[uuid.UUID] | None) -> list[uuid.UUID]:
-        # Vectors find the right kind of profile; full text catches exact skills and places.
-        nearest = await embeddings.nearest_candidates_to_vector(
-            session, vector, embedding_model, count=POOL_SIZE, within=within
-        )
-        keyword_ids = await candidates.full_text_candidate_ids(
-            session, keyword_text, count=POOL_SIZE, within=within
-        )
-        return ranking.fuse([cid for cid, _ in nearest], keyword_ids, count=POOL_SIZE)
+        return await _hybrid_ids(session, vector, embedding_model, keyword_text, within)
 
     await progress.start("retrieval", "Searching profiles by meaning and keywords")
     filtered = bool(_active_filters(filters))

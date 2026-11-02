@@ -3,7 +3,8 @@ import { apiRequest } from '@/shared/api/client'
 import { COUNTRIES } from '@/shared/data/countries'
 import type { EducationFormValues, ExperienceFormValues, ProfileFormValues } from './schema'
 
-export const MAX_RESUME_BYTES = 10 * 1024 * 1024
+// The API refuses bigger uploads (Vercel caps request bodies at 4.5 MB).
+export const MAX_RESUME_BYTES = 4 * 1024 * 1024
 export const RESUME_FILE_TYPES = '.pdf,.doc,.docx,.txt'
 
 export interface ProfileSuggestion {

@@ -1,0 +1,16 @@
+# Never upload secrets or local tooling; Vercel reads its own environment variables.
+.env
+.env.*
+.venv/
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Not needed at runtime (migrations run from scripts/deploy-vercel.ps1 before deploying).
+tests/
+app/**/tests/
+evals/
+migrations/
+alembic.ini
+scripts/
+conftest.py

@@ -20,7 +20,7 @@ export function ResumeBar({ candidate }: { candidate: CandidateDetail }) {
     if (!file) return
     setFileName(file.name)
     if (file.size > MAX_RESUME_BYTES) {
-      setFileError('The file is too large. Upload one under 10 MB.')
+      setFileError('The file is too large. Upload one under 4 MB.')
       return
     }
     attach.mutate(file)

@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.core import storage
 from app.core.errors import ForbiddenError, NotFoundError
 from app.core.pagination import decode_created_at_cursor, next_created_at_cursor
 from app.features.audit import AuditAction, record_event
@@ -354,6 +355,11 @@ async def update_candidate(
                 )
             # A changed search document is re-embedded by the stale scan; nothing to queue here.
             changed = _apply_profile(candidate, data)
+            # Any profile change makes the stored resume PDF stale (user decision): the next
+            # "See resume" fetches a fresh one.
+            stale_pdf = candidate.resume_pdf_key if changed else None
+            if stale_pdf is not None:
+                candidate.resume_pdf_key = None
             await session.flush()
             # Field names only: the audit log must not hold personal data.
             _audit(session, actor, "candidate.update", candidate.id, changed_fields=changed)
@@ -365,6 +371,7 @@ async def update_candidate(
         raise VersionConflictError(
             "This profile was changed by someone else. Reload to see the latest version."
         ) from exc
+    await storage.discard(stale_pdf)
     logger.info("candidate_updated", candidate_id=str(candidate_id))
     return to_detail(candidate)
 
@@ -375,37 +382,78 @@ async def delete_candidate(
     if not actor.is_admin:
         raise ForbiddenError("Only admins can delete candidates.")
     async with session.begin():
-        if not await repository.delete_candidate(session, candidate_id):
+        deleted, pdf_key = await repository.delete_candidate(session, candidate_id)
+        if not deleted:
             raise NotFoundError("Candidate not found.")
         _audit(session, actor, "candidate.delete", candidate_id)
+    await storage.discard(pdf_key)
     logger.info("candidate_deleted", candidate_id=str(candidate_id))
 
 
 # --- Resumes (the files live in ResumeAI; features/resumes calls it) -------------------------
 
 
-async def get_resume_ref(
-    session: AsyncSession, candidate_id: uuid.UUID, actor: AuthContext, *, viewing: bool
-) -> uuid.UUID | None:
+async def get_resume_ref(session: AsyncSession, candidate_id: uuid.UUID) -> uuid.UUID | None:
     """The candidate's ResumeAI reference (None when no resume is attached). 404 for an unknown
-    candidate. With `viewing`, records that the actor opened the resume."""
+    candidate. Viewing the resume goes through open_resume, which is audited."""
     async with session.begin():
         candidate = await repository.get_candidate_row(session, candidate_id)
         if candidate is None:
             raise NotFoundError("Candidate not found.")
-        if viewing and candidate.resume_ref is not None:
-            _audit(session, actor, "candidate.resume_view", candidate_id)
         return candidate.resume_ref
+
+
+@dataclass(frozen=True)
+class OpenedResume:
+    """What "See resume" needs: ResumeAI's ref, the stored PDF (if any), and the profile version
+    it must still match when a freshly fetched PDF is recorded."""
+
+    resume_ref: uuid.UUID
+    pdf_key: str | None
+    version: int
+
+
+async def open_resume(
+    session: AsyncSession, candidate_id: uuid.UUID, actor: AuthContext
+) -> OpenedResume | None:
+    """None when no resume is attached; 404 for an unknown candidate. Audited as a view."""
+    async with session.begin():
+        candidate = await repository.get_candidate_row(session, candidate_id)
+        if candidate is None:
+            raise NotFoundError("Candidate not found.")
+        if candidate.resume_ref is None:
+            return None
+        _audit(session, actor, "candidate.resume_view", candidate_id)
+        return OpenedResume(candidate.resume_ref, candidate.resume_pdf_key, candidate.version)
+
+
+async def record_resume_pdf(
+    session: AsyncSession, candidate_id: uuid.UUID, key: str, opened: OpenedResume
+) -> bool:
+    """Point the candidate at a newly stored PDF. False when the resume or profile changed
+    meanwhile (or another view stored one first); the caller then deletes its file."""
+    async with session.begin():
+        return await repository.set_resume_pdf_key(
+            session,
+            candidate_id,
+            key,
+            resume_ref=opened.resume_ref,
+            version=opened.version,
+            replacing=opened.pdf_key,
+        )
 
 
 async def attach_resume(
     session: AsyncSession, candidate_id: uuid.UUID, resume_ref: uuid.UUID, actor: AuthContext
 ) -> None:
-    """Link a resume ResumeAI has stored to the candidate. Profile fields stay as they are."""
+    """Link a resume ResumeAI has stored to the candidate. Profile fields stay as they are; a
+    stored PDF of the old resume is removed."""
     async with session.begin():
-        if not await repository.set_resume_ref(session, candidate_id, resume_ref):
+        found, stale_pdf = await repository.lock_resume_pdf_key(session, candidate_id)
+        if not found or not await repository.set_resume_ref(session, candidate_id, resume_ref):
             raise NotFoundError("Candidate not found.")
         _audit(session, actor, "candidate.resume_attach", candidate_id)
+    await storage.discard(stale_pdf)
 
 
 # --- Bookmarks (one list shared by the team) ------------------------------------------------

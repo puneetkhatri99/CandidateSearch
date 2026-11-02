@@ -8,12 +8,17 @@ from dotenv import dotenv_values
 def _test_database_url() -> str:
     """Tests always use a dedicated database, never the dev one.
 
-    TEST_DATABASE_URL wins (CI); otherwise derive `<dev db name>_test` from backend/.env.
+    TEST_DATABASE_URL wins (environment, then backend/.env); otherwise derive
+    `<dev db name>_test` from a local DATABASE_URL.
     """
-    if url := os.environ.get("TEST_DATABASE_URL"):
+    env_file = dotenv_values(Path(__file__).parent / ".env")
+    if url := os.environ.get("TEST_DATABASE_URL") or env_file.get("TEST_DATABASE_URL"):
         return url
-    dev_url = dotenv_values(Path(__file__).parent / ".env").get("DATABASE_URL")
+    dev_url = env_file.get("DATABASE_URL")
     if dev_url:
+        # Tests empty every table: never derive a test database on a hosted server (Neon).
+        if "@localhost" not in dev_url and "@127.0.0.1" not in dev_url:
+            raise RuntimeError("DATABASE_URL isn't local; set TEST_DATABASE_URL in backend/.env.")
         base, _, name = dev_url.rpartition("/")
         return f"{base}/{name}_test"
     return "postgresql+asyncpg://test:test@localhost:5432/test"
@@ -26,6 +31,9 @@ os.environ["DATABASE_URL"] = _test_database_url()
 os.environ["OPENAI_API_KEY"] = "sk-test-not-a-real-key"
 # Tests never start background tasks (embedding, pruning); they call the functions directly.
 os.environ["MAINTENANCE_IN_API"] = "false"
+# No bucket or keys: tests install an in-memory store, so the real .env bucket is never touched.
+for name in ("RESUME_BUCKET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_ENDPOINT_URL_S3"):
+    os.environ[name] = ""
 # The SDK reads these itself; they must not redirect requests or turn on input logging.
 os.environ.pop("OPENAI_BASE_URL", None)
 os.environ.pop("OPENAI_LOG", None)
