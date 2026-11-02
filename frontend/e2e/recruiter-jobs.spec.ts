@@ -28,7 +28,8 @@ test.describe('recruiter accounts and job roles', () => {
     // 1. The admin signs in and opens the staff list.
     await signIn(page, adminEmail, E2E_STAFF_PASSWORD)
     await expect(page.getByRole('heading', { level: 1, name: 'Candidates' })).toBeVisible()
-    await page.getByRole('link', { name: 'Users' }).click()
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click()
+    await page.getByRole('link', { name: 'Users', exact: true }).click()
     await expect(page.getByRole('heading', { level: 1, name: 'Staff accounts' })).toBeVisible()
 
     // 2. Add a recruiter with a generated temporary password.
@@ -60,7 +61,9 @@ test.describe('recruiter accounts and job roles', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Candidates' })).toBeVisible()
     const nav = page.getByRole('navigation', { name: 'Main' })
     await expect(nav.getByRole('link', { name: 'Jobs', exact: true })).toBeVisible()
-    await expect(nav.getByRole('link', { name: 'Users' })).toHaveCount(0)
+    await nav.getByRole('link', { name: 'Settings' }).click()
+    await expect(page.getByRole('link', { name: 'System', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Users', exact: true })).toHaveCount(0)
     await page.goto('/admin/users')
     await expect(page.getByText('Only admins can manage staff accounts.')).toBeVisible()
 

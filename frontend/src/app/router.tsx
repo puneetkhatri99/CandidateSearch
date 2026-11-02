@@ -8,6 +8,7 @@ import { SystemPage } from '@/features/system-status'
 import { UserListPage } from '@/features/user-admin'
 import { HomePage, NotFoundPage } from './pages'
 import { PublicLayout, RootLayout } from './RootLayout'
+import { SettingsPage } from './SettingsPage'
 
 const routes = [
   {
@@ -37,6 +38,7 @@ const routes = [
           { path: '/jobs/new', element: <JobCreatePage /> },
           { path: '/jobs/:id', element: <JobDetailPage /> },
           { path: '/admin/system', element: <SystemPage /> },
+          { path: '/settings', element: <SettingsPage /> },
           {
             element: <RequireRole role="admin" />,
             children: [{ path: '/admin/users', element: <UserListPage /> }],

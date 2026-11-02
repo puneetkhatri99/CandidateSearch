@@ -28,10 +28,11 @@ const navLinkClass = (active: boolean) =>
       : 'border-transparent text-fg-muted hover:bg-surface-muted/60 hover:text-fg'
   }`
 
+const SETTINGS_PATHS = ['/settings', '/admin/users', '/admin/system']
+
 /** Staff shell: fixed left sidebar on desktop, a top bar at phone width. */
 export function RootLayout() {
   const { pathname } = useLocation()
-  const { data: user } = useCurrentUser()
   const onCreate = pathname === '/admin/candidates/new'
   const onCreateJob = pathname === '/jobs/new'
   const links = [
@@ -40,8 +41,8 @@ export function RootLayout() {
     { to: '/jobs', label: 'Jobs', active: pathname.startsWith('/jobs') && !onCreateJob },
     { to: '/jobs/new', label: 'Add job', active: onCreateJob },
     { to: '/admin/ai-usage', label: 'AI spending', active: pathname.startsWith('/admin/ai-usage') },
-    ...(user?.role === 'admin' ? [{ to: '/admin/users', label: 'Users', active: pathname.startsWith('/admin/users') }] : []),
-    { to: '/admin/system', label: 'System', active: pathname.startsWith('/admin/system') },
+    // Users, System and Change password open from Settings.
+    { to: '/settings', label: 'Settings', active: SETTINGS_PATHS.some((path) => pathname.startsWith(path)) },
   ]
 
   return (
@@ -64,9 +65,6 @@ export function RootLayout() {
         </nav>
         <div className="order-2 flex flex-col gap-3 md:order-3 md:mt-auto md:border-t md:border-border md:pt-4">
           <UserMenu stacked />
-          <div className="hidden md:block">
-            <SystemStatus />
-          </div>
         </div>
       </aside>
       <main id="main" className="min-w-0 px-4 py-6 md:px-10 md:py-8">

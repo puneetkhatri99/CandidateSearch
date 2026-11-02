@@ -33,7 +33,7 @@ src/
     jobs/               job list, create, detail, edit, close
     user-admin/         staff accounts (admins)
     ai-usage/           AI spend page
-    system-status/      the "API online" dot in the sidebar, and the System page (/admin/system)
+    system-status/      the "API online" line on public pages, and the System page (/admin/system)
   shared/
     api/client.ts       fetch wrapper
     api/stream.ts       SSE reader
@@ -71,6 +71,10 @@ Import rules (same idea as the backend):
 | `/jobs`, `/jobs/new`, `/jobs/:id` | Jobs | signed in |
 | `/admin/ai-usage` | AI spend | signed in |
 | `/admin/users` | Staff accounts | admin |
+| `/admin/system` | System | signed in |
+| `/settings` | Settings: links to Change password, Users (admins only) and System | signed in |
+
+The sidebar lists Candidates, Add candidate, Jobs, Add job, AI spending and Settings. Settings stays highlighted on the pages it opens. The bottom of the sidebar holds only the signed-in name, role and Sign out; Change password moved to Settings (`app/SettingsPage.tsx`).
 
 `RequireAuth` (in `features/auth`) asks `GET /auth/me`. No user → redirect to `/login?next=...`. User must change password → redirect to `/account/password`. `RequireRole` checks the role. These guards are for a good experience only; **the API enforces the real rules**.
 
@@ -123,13 +127,13 @@ The job detail page uses the same pieces through `JobMatches`.
 
 ## The System page
 
-`SystemPage` (sidebar link "System", for all staff) shows three blocks:
+`SystemPage` (Settings → System, for all staff) shows three blocks:
 
 - **Status:** API, database and pgvector, and when they were last checked. It comes from `useSystemStatus`, which polls the public `/ready` every 30 s. `fetchReadiness` keeps the 503 body, so the page can say which dependency is down.
 - **Search and embeddings:** how many candidates and jobs have up-to-date embeddings, and the AI budget.
 - **AI models:** the models and prompt versions in use.
 
-The last two come from `GET /api/v1/admin/system` through `useSystemDetails`, also every 30 s. If that call fails, an alert shows and the status block keeps working. The small "API online" dot stays in the sidebar on every page.
+The last two come from `GET /api/v1/admin/system` through `useSystemDetails`, also every 30 s. If that call fails, an alert shows and the status block keeps working. Staff pages have no status dot of their own (user decision); public pages still show "API online" in their footer.
 
 ## Forms
 
